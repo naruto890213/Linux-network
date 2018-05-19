@@ -1,3 +1,21 @@
+|-->SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count) //(fs/read_write.c) read
+	|-->vfs_read //(read_write.c)
+	|-->file_pos_write //()
+
+
+
+|-->SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
+        unsigned long, prot, unsigned long, flags,
+        unsigned long, fd, unsigned long, off) //(arch/x86/kernel/sys_x86_64.c)
+	|-->sys_mmap_pgoff //()
+		|-->SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
+        unsigned long, prot, unsigned long, flags,
+        unsigned long, fd, unsigned long, pgoff) //(mm/mmap.c)
+			|-->vm_mmap_pgoff //(util.c)
+				|-->do_mmap_pgoff //(mm.h)
+					|-->do_mmap //()
+
+
 |-->start_kernel //(init/main.c)
 	|-->pagecache_init //(filemap.c)
 		|-->page_writeback_init //(page-writeback.c)
@@ -45,6 +63,18 @@
 							|-->read_pages //(readahead.c)
 								|-->blk_start_plug //()
 								|-->mapping->a_ops->readpages //(readahead.c) 调用fs目录下定义的readpages回调函数
+									|-->ext4_readpages //(fs/ext4/inode.c)
+										|-->ext4_mpage_readpages //(fs/ext4/readpage.c)
+											|-->add_to_page_cache_lru //
+											|-->submit_bio //(blk-core.c)
+												|-->generic_make_request //(blk-core.c)
+													|-->bio_list_init //()
+													|-->bdev_get_queue //()
+													|-->blk_queue_enter //()
+													|-->make_request_fn //()
+													|-->blk_queue_exit //()
+													|-->bio_list_pop //()
+
 								|-->blk_finish_plug //()		
 
 			|-->iov_iter_truncate //
@@ -59,3 +89,31 @@
 						|-->__page_cache_release //()		
 
 			|-->iov_iter_count //
+
+
+|-->blk_init_queue //(blk-core.c)
+	|-->blk_init_queue_node //(blk-core.c)
+		|-->blk_init_allocated_queue //(blk-core.c)
+			|-->blk_queue_make_request(q, blk_queue_bio) //(blk-settings.c)
+				|-->q->make_request_fn = mfn //(blk-settings.c)
+					|-->blk_queue_bio //(blk-core.c)
+						|-->
+
+
+
+|-->submit_bh //(buffer.c)
+	|-->submit_bh_wbc //()
+
+
+|-->.writepage	= blkdev_writepage //(block_dev.c)
+	|-->blkdev_writepage //(block_dev.c)
+		|-->block_write_full_page //(buffer.c)
+			|-->__block_write_full_page //(buffer.c)
+				|-->create_page_buffers //(buffer.c)
+				|-->block_size_bits //(buffer.c)
+				|-->submit_bh_wbc //(buffer.c)
+					|-->bio_alloc //()
+					|-->wbc_init_bio //
+					|-->wbc_account_io //
+					|-->bio_add_page //()
+					|-->submit_bio //(blk-core.c)
