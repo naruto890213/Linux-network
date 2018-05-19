@@ -44,7 +44,7 @@
 							|-->__page_cache_alloc //()
 							|-->read_pages //(readahead.c)
 								|-->blk_start_plug //()
-								|-->mapping->a_ops->readpages //(readahead.c) 调用readpages回调函数
+								|-->mapping->a_ops->readpages //(readahead.c) 调用fs目录下定义的readpages回调函数
 								|-->blk_finish_plug //()		
 
 			|-->iov_iter_truncate //
