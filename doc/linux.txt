@@ -13,7 +13,13 @@
         unsigned long, fd, unsigned long, pgoff) //(mm/mmap.c)
 			|-->vm_mmap_pgoff //(util.c)
 				|-->do_mmap_pgoff //(mm.h)
-					|-->do_mmap //()
+					|-->do_mmap //(mmap.c)
+						|-->mmap_region //(mmap.c)
+							|-->call_mmap //(fs.h)
+								|-->file->f_op->mmap //()
+									|-->generic_file_mmap //(filemap.c)
+										|-->file_accessed //(filemap.c)
+										|-->vma->vm_ops = &generic_file_vm_ops //(filemap.c)
 
 
 |-->start_kernel //(init/main.c)
@@ -48,6 +54,20 @@
 
 |-->.read_iter //()
 	|-->generic_file_read_iter //(filemap.c)
+		|-->if direct_IO
+			|-->ext4_direct_IO //(fs/ext4/inode.c)
+				|-->trace_ext4_direct_IO_enter //
+				|-->ext4_direct_IO_read //
+				|-->ext4_direct_IO_write //
+					|-->__blockdev_direct_IO //(direct-io.c)
+						|-->do_blockdev_direct_IO //(direct-io.c)
+							|-->do_direct_IO //(direct-io.c)
+								|-->submit_page_section //(direct-io.c)
+									|-->dio_bio_submit //(direct-io.c)
+										|-->submit_bio //
+
+				|-->trace_ext4_direct_IO_exit //()
+
 		|-->do_generic_file_read //(filemap.c)
 			|-->page_cache_async_readahead //(readahead.c)
 				|-->ondemand_readahead //(readahead.c)
