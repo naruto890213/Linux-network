@@ -1,6 +1,38 @@
 |-->SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count) //(fs/read_write.c) read
 	|-->vfs_read //(read_write.c)
 	|-->file_pos_write //()
+	
+	
+|-->SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf, size_t, count) //(read_write.c)
+	|-->vfs_write //(read_write.c)
+		|-->rw_verify_area //(read_write.c)
+		|-->file_start_write //(fs.h)
+			|-->__sb_start_write //(super.c)
+			
+		|-->__vfs_write //(read_write.c)
+			|-->if (file->f_op->write)
+				|-->file->f_op->write(file, p, count, pos) //
+				
+			|-->if (file->f_op->write_iter)
+				|-->new_sync_write //(read_write.c)
+					|-->call_write_iter //(fs.h)
+						|-->file->f_op->write_iter //(fs.h)
+							|-->ext4_file_write_iter //(file.c)
+								|-->__generic_file_write_iter //(filemap.c)
+									|-->generic_file_direct_write //() 当设置DIRECT标记IOCB_DIRECT时需要先调用该函数
+										|-->mapping->a_ops->direct_IO //(filemap.c) 调用定义的direct_IO回调函数
+											|-->ext4_direct_IO //见ext4中定义的函数
+									
+									|-->generic_perform_write //()
+								
+								|-->generic_write_sync //(fs.h)
+									|-->vfs_fsync_range //(sync.c)
+										|-->file->f_op->fsync //(sync.c)
+											|-->ext4_sync_file //(fs/ext4/fsync.c)
+												|-->trace_ext4_sync_file_enter //()
+												|-->
+		
+		|-->file_end_write //()
 
 
 
