@@ -1,0 +1,10 @@
+|-->try_to_unmap //(rmap.c)
+	|-->rmap_walk //()
+		|-->PageAnon //(page-flags.h) 读取mapping的最低位，最低位为1表示该页为匿名页，否则为映射页
+		|-->rmap_walk_anon //(rmap.c) 匿名页处理函数
+			|-->
+
+		|-->rmap_walk_file //(rmap.c) 映射页处理函数
+		
+	|-->page_mapcount //(mm.h)
+		|-->tomic_read(&page->_mapcount) //读取_mapcount的数值+1，表示当前的页是否为共享
