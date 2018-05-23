@@ -1,10 +1,28 @@
 |-->try_to_unmap //(rmap.c)
-	|-->rmap_walk //()
+	|-->rwc.invalid_vma = invalid_migration_vma //(rmap.c)
+	|-->.rmap_one = try_to_unmap_one //(rmap.c)
+	|-->.done = page_mapcount_is_zero //(rmap.c)
+	|-->rmap_walk_locked //()
 		|-->PageAnon //(page-flags.h) 读取mapping的最低位，最低位为1表示该页为匿名页，否则为映射页
 		|-->rmap_walk_anon //(rmap.c) 匿名页处理函数
 			|-->
 
 		|-->rmap_walk_file //(rmap.c) 映射页处理函数
+			|-->page_mapping //()
+			|-->page_to_pgoff //()
+			|-->vma_interval_tree_foreach //()
+			|-->vma_address //()
+			|-->rwc->invalid_vma //(rmap.c)
+				|-->invalid_migration_vma //(rmap.c)
+					|-->is_vma_temporary_stack //(rmap.c)
+						
+			|-->rwc->rmap_one //(rmap.c)
+				|-->try_to_unmap_one //(rmap.c)
+					|-->page_vma_mapped_walk //(page_vma_mapped.c)
+						|-->
+
+			|-->rwc->done //(rmap.c)
+				|-->page_mapcount_is_zero //(rmap.c)
 		
 	|-->page_mapcount //(mm.h)
 		|-->tomic_read(&page->_mapcount) //读取_mapcount的数值+1，表示当前的页是否为共享
