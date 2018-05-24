@@ -21,8 +21,20 @@
 					|-->page_vma_mapped_walk //(page_vma_mapped.c)
 						|-->
 
+					|-->flush_cache_page //()
+						|-->
+
+					|-->should_defer_flush //
+					|-->ptep_clear_flush //()
+					|-->update_hiwater_rss //
+					|-->page_remove_rmap //()
+					|-->
+
 			|-->rwc->done //(rmap.c)
 				|-->page_mapcount_is_zero //(rmap.c)
+					|-->total_mapcount //(mm.h)
+						|-->page_mapcount //(mm.h)
+							|-->atomic_read(&page->_mapcount) + 1 //(mm.h) 判断是否属于共享页面
 		
 	|-->page_mapcount //(mm.h)
 		|-->tomic_read(&page->_mapcount) //读取_mapcount的数值+1，表示当前的页是否为共享
