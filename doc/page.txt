@@ -10,7 +10,10 @@
 		|-->rmap_walk_file //(rmap.c) 映射页处理函数
 			|-->page_mapping //()
 			|-->page_to_pgoff //()
-			|-->vma_interval_tree_foreach //()
+			|-->vma_interval_tree_foreach //(mm.h)
+				|-->vma_interval_tree_iter_first //()
+				|-->vma_interval_tree_iter_next //()
+
 			|-->vma_address //()
 			|-->rwc->invalid_vma //(rmap.c)
 				|-->invalid_migration_vma //(rmap.c)
@@ -26,9 +29,28 @@
 
 					|-->should_defer_flush //
 					|-->ptep_clear_flush //()
-					|-->update_hiwater_rss //
-					|-->page_remove_rmap //()
-					|-->
+					|-->update_hiwater_rss //(mm.h)
+						|-->get_mm_rss //()
+
+					|-->swp_entry_to_pte //(swapops.h)
+						|-->__swp_entry //()
+							|-->mk_swap_pte //()
+						|-->__swp_entry_to_pte //()
+
+					|-->pte_soft_dirty //()
+					|-->pte_swp_mksoft_dirty //()
+					|-->set_pte_at //()
+
+					|-->page_remove_rmap //(rmap.c)
+						|-->page_remove_file_rmap //(rmap.c)
+							|-->
+
+						|-->page_remove_anon_compound_rmap //()
+
+					|-->mmu_notifier_invalidate_page //(mmu_notifier.h)
+						|-->mm_has_notifiers //(mmu_notifier.h)
+						|-->__mmu_notifier_invalidate_page //(mmu_notifier.c)
+							|-->mn->ops->invalidate_page //(mmu_notifier.c)
 
 			|-->rwc->done //(rmap.c)
 				|-->page_mapcount_is_zero //(rmap.c)
@@ -38,3 +60,25 @@
 		
 	|-->page_mapcount //(mm.h)
 		|-->tomic_read(&page->_mapcount) //读取_mapcount的数值+1，表示当前的页是否为共享
+
+
+|-->__perform_reclaim //(page_alloc.c)
+
+|-->alloc_page_buffers //(buffer.c)
+	|-->free_more_memory //(buffer.c)
+		|-->try_to_free_pages //(vmscan.c)
+			|-->throttle_direct_reclaim //()
+			|-->trace_mm_vmscan_direct_reclaim_begin //()
+			|-->do_try_to_free_pages //(vmscan.c)
+				|-->shrink_zones //(vmscan.c)
+					|-->shrink_node //(vmscan.c)
+						|-->shrink_slab //(vmscan.c)
+							|-->do_shrink_slab //(vmscan.c)
+								|-->trace_mm_shrink_slab_start //()
+								|-->trace_mm_shrink_slab_end //()
+	
+				|-->delayacct_freepages_end //(delayacct.h)
+					|-->__delayacct_freepages_end //(delayacct.c)
+						|-->delayacct_end //(delayacct.c)
+		
+			|-->trace_mm_vmscan_direct_reclaim_end //()
