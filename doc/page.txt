@@ -1,3 +1,25 @@
+|-->do_anonymous_page //(memory.c) 加载匿名页
+
+|-->mark_page_accessed //(swap.c) 处理页标记，将其标记为访问过的页面
+
+|-->page_referenced //(rmap.c)
+	|-->.rmap_one = page_referenced_one //(rmap.c)
+	|-->rwc.invalid_vma = invalid_page_referenced_vma //(rmap.c)
+	|-->rmap_walk //(rmap.c) 3个分支，分别是内核、匿名映射、文件映射
+		|-->rmap_walk_ksm //()
+		|-->rmap_walk_anon //(rmap.c)
+		|-->rmap_walk_file //(rmap.c)
+			|-->rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg) //()
+				|-->invalid_page_referenced_vma //(rmap.c)
+					|-->mm_match_cgroup //(memcontrol.h)
+						|-->mem_cgroup_from_task //()
+						|-->mem_cgroup_is_descendant //()
+
+			|-->rwc->rmap_one(page, vma, address, rwc->arg) //()
+				|-->page_referenced_one //(rmap.c)
+					|-->page_vma_mapped_walk //()
+					|-->
+
 |-->vma 管理 //(include/linux/mm_types.h)
 struct vm_area_struct {
 	unsigned long vm_start;//当前这个VMA的起始虚拟地址
