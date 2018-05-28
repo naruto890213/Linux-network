@@ -1,3 +1,98 @@
+|-->vma 管理 //(include/linux/mm_types.h)
+struct vm_area_struct {
+	unsigned long vm_start;//当前这个VMA的起始虚拟地址
+	unsigned long vm_end; //vm_end是结束地址后的一个byte的地址
+	struct vm_area_struct *vm_next, *vm_prev; //当前进程的所有的VMA链接起来
+	pgprot_t vm_page_prot; //访问权限
+};__randomize_layout;
+
+|-->mmap_mem //(drivers/char/mem.c) mmap的实现
+	|-->remap_pfn_range //(memory.c)
+		|-->pgd_addr_end //(memory.c)
+		|-->remap_p4d_range //(memory.c)
+			|-->p4d_alloc //(memory.c)
+			|-->p4d_addr_end //(memory.c)
+			|-->remap_pud_range //(memory.c)	
+				|-->pud_alloc //(memory.c)
+				|-->pud_addr_end //(memory.c)
+				|-->remap_pmd_range //(memory.c)
+					|-->pmd_alloc //(memory.c)
+					|-->pmd_addr_end //(memory.c)
+					|-->remap_pte_range //(memory.c)
+						|-->pte_alloc_map_lock //(mm.h)
+							|-->pte_alloc //(mm.h)
+								|-->__pte_alloc //(memory.c)
+									|-->pte_alloc_one //(pgtable.c)
+										|-->alloc_pages //(gfp.h)
+											|-->alloc_pages_current //(mempolicy.c)
+												|-->alloc_page_interleave //() 适用于大内存分配，然后将其清零					
+												|-->__alloc_pages_nodemask //(page_alloc.c)
+													|-->prepare_alloc_pages //(page_alloc.c)
+														|-->gfp_zone //(gfp.h) 根据参数gfp_mask找到适合的区域(区域包括ZONE_DMA、ZONE_DMA32、ZONE_NORMAL、ZONE_HIGHMEM)
+														|-->node_zonelist //(gfp.h)
+														|-->gfpflags_to_migratetype //(gfp.h) 根据页面申请标志gfp_mask转换为相应的内存迁移类型
+														
+														|-->should_fail_alloc_page //(page_alloc.c)
+															|-->should_fail //(fault-inject.c)
+																|-->in_task //()
+															
+													|-->get_page_from_freelist //(page_alloc.c)
+														|-->for_next_zone_zonelist_nodemask //(mmzone.h) 循环zone链表
+														|-->node_dirty_ok //(page-writeback.c) 查看是否dirty的数量是否已经到limit
+														|-->zone_watermark_fast //(page_alloc.c)
+															|-->__zone_watermark_ok //(page_alloc.c)
+																|-->list_empty(&area->free_list) //(page_alloc.c) 检查free_list链表是否还有节点 用于快速分配
+														
+														|-->zone_allows_reclaim //()
+														|-->node_reclaim //()
+														|-->zone_watermark_ok //()
+														|-->rmqueue //(page_alloc.c)
+															|-->rmqueue_pcplist //(page_alloc.c)
+																|-->__rmqueue_pcplist //(page_alloc.c)
+																	|-->rmqueue_bulk //(page_alloc.c)
+																		|-->__rmqueue //(page_alloc.c)
+																			|-->__rmqueue_smallest //(page_alloc.c)
+																				|-->list_first_entry_or_null //()
+																			
+																			|-->trace_mm_page_alloc_zone_locked //()
+																		
+																		|-->check_pcp_refill //(page_alloc.c)
+																			|-->check_new_page //(page_alloc.c)
+																				|-->return 0;
+																		
+																		|-->list_add(&page->lru, list) //()
+																		|-->list_add_tail(&page->lru, list) //()
+																		|-->__mod_zone_page_state //(vmstat.h)
+																			|-->zone_page_state_add //(vmstat.h)
+																	
+																	if(cold)
+																		|-->list_last_entry //(list.h) 获取lru链表的尾部元素
+																	else
+																		|-->list_first_entry //(list.h) 插入lru链表的头部元素
+																		
+																	|-->list_del(&page->lru) //将page从lru链表中删除
+																	|-->check_new_pcp //(page_alloc.c)
+																		|-->return false //(page_alloc.c)
+																
+																|-->__count_zid_vm_events //()
+																|-->zone_statistics //()
+														
+														|-->prep_new_page //()
+													
+													|-->__alloc_pages_slowpath //(page_alloc.c)
+														|-->get_page_from_freelist //(page_alloc.c)
+															|-->
+														
+														|-->__alloc_pages_direct_compact //(page_alloc.c)			
+					
+													|-->kmemcheck_pagealloc_alloc //()					
+
+										|-->pgtable_page_ctor //()
+			
+									|-->smp_wmb //(barrier.h) 内存屏障
+									|-->pmd_populate //(barrier.h)
+
+
 |-->try_to_unmap //(rmap.c)
 	|-->rwc.invalid_vma = invalid_migration_vma //(rmap.c)
 	|-->.rmap_one = try_to_unmap_one //(rmap.c)
@@ -72,6 +167,7 @@
 			|-->do_try_to_free_pages //(vmscan.c)
 				|-->shrink_zones //(vmscan.c)
 					|-->shrink_node //(vmscan.c)
+						|-->shrink_node_memcg //(vmscan.c)
 						|-->shrink_slab //(vmscan.c)
 							|-->do_shrink_slab //(vmscan.c)
 								|-->trace_mm_shrink_slab_start //()
