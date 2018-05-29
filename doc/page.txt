@@ -28,6 +28,38 @@ struct vm_area_struct {
 	pgprot_t vm_page_prot; //访问权限
 };__randomize_layout;
 
+
+|-->zone数据结构 //(include/linux/mmzone.h)
+struct zone {
+	unsigned long watermark[NR_WMARK]; //内存水位WMARK_MIN、WMARK_LOW、WMARK_HIGH
+	long lowmem_reserve[MAX_NR_ZONES] //每个管理区必须保留的页框数
+	struct pglist_data  *zone_pgdat; //zone的主要数据结构，内部包含lru链表和具体的数据
+	unsigned long       spanned_pages; //管理区的大小,包括洞
+	unsigned long       present_pages; //管理区的大小，不包括洞
+	.......
+};
+
+|-->lru数据结构体 //(include/linux/mmzone.h)
+	|-->NR_LRU_LISTS //(mmzone.h) 内部包含5条list
+		|-->LRU_INACTIVE_ANON // 不活跃的匿名页  page->flags不带有PG_active
+		|-->LRU_ACTIVE_ANON // 活跃的匿名页 page->flags带有PG_active
+		|-->LRU_INACTIVE_FILE // 不活跃的文件缓存 page->flags不带有PG_active 
+		|-->LRU_ACTIVE_FILE // 活跃的文件缓存 page->flags带有PG_active
+		|-->LRU_UNEVICTABLE // 不可回收页 page->flags带有PG_unevictable
+		
+struct lruvec {
+    struct list_head        lists[NR_LRU_LISTS];//内部包含5条链表，分别是LRU_INACTIVE_ANON
+    struct zone_reclaim_stat    reclaim_stat;
+    /* Evictions & activations on the inactive file list */
+    atomic_long_t           inactive_age;
+    /* Refaults at the time of last reclaim cycle */
+    unsigned long           refaults;
+#ifdef CONFIG_MEMCG
+    struct pglist_data *pgdat;
+#endif
+};
+
+
 |-->mmap_mem //(drivers/char/mem.c) mmap的实现
 	|-->remap_pfn_range //(memory.c)
 		|-->pgd_addr_end //(memory.c)
