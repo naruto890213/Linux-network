@@ -59,7 +59,6 @@ struct lruvec {
 #endif
 };
 
-
 |-->mmap_mem //(drivers/char/mem.c) mmap的实现
 	|-->remap_pfn_range //(memory.c)
 		|-->pgd_addr_end //(memory.c)
@@ -137,6 +136,12 @@ struct lruvec {
 														|-->get_page_from_freelist //(page_alloc.c)
 															|-->
 														
+														|-->__alloc_pages_direct_reclaim //(page_alloc.c)
+															|-->__perform_reclaim //(page_alloc.c)
+																|-->try_to_free_pages //(vmscan.c)
+																	|-->do_try_to_free_pages //(vmscan.c)
+																		|-->shrink_zones //(vmscan.c)
+
 														|-->__alloc_pages_direct_compact //(page_alloc.c)			
 					
 													|-->kmemcheck_pagealloc_alloc //()					
@@ -210,6 +215,17 @@ struct lruvec {
 	|-->page_mapcount //(mm.h)
 		|-->tomic_read(&page->_mapcount) //读取_mapcount的数值+1，表示当前的页是否为共享
 
+|-->kswapd //(vmscan.c)
+	|-->balance_pgdat //(vmscan.c)
+		|-->kswapd_shrink_node //(vmscan.c)
+			|-->shrink_node //(vmscan.c)
+
+
+|-->alloc_pages_node //(gfp.h)
+	|-->__alloc_pages_node //(gfp.h)
+		|-->__alloc_pages //(gfp.h)
+			|-->__alloc_pages_nodemask //(page_alloc.c)
+				|-->
 
 |-->__perform_reclaim //(page_alloc.c)
 
@@ -222,6 +238,29 @@ struct lruvec {
 				|-->shrink_zones //(vmscan.c)
 					|-->shrink_node //(vmscan.c)
 						|-->shrink_node_memcg //(vmscan.c)
+							|-->shrink_list //(vmscan.c)
+								|-->shrink_active_list //(vmscan.c)
+									|-->lru_add_drain //(vmscan.c) 处理lru缓存
+									|-->isolate_lru_pages //(vmscan.c) 找出unevictable之外anon lru page, PG_lru清零，暂存到一个list中，并传递给skrink_page_list()
+									|-->free_hot_cold_page_list //(vmscan.c) 
+
+								|-->shrink_inactive_list //(vmscan.c)
+									|-->lru_add_drain //(vmscan.c) 处理lru缓存
+									|-->isolate_lru_pages //(vmscan.c) 找出unevictable之外anon lru page, PG_lru清零，暂存到一个list中，并传递给skrink_page_list()
+									|-->shrink_page_list //(vmscan.c) 遍历page_list中所有的page
+										|-->if(PageAnon(page))
+											|-->add_to_swap //(swap_state.c) 分配一个新页槽，并把叶框插入swap cache
+												|-->get_swap_page //()
+												|-->add_to_swap_cache //()
+												|-->
+
+										|-->if(page_mapped(page)) 对全部映射了该页的进程执行取消映射的操作
+											|-->try_to_unmap //()
+
+										|-->pageout //() 对所有的脏页执行write back
+
+									|-->free_hot_cold_page_list //(vmscan.c) 
+
 						|-->shrink_slab //(vmscan.c)
 							|-->do_shrink_slab //(vmscan.c)
 								|-->trace_mm_shrink_slab_start //()
