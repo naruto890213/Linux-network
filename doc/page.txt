@@ -59,6 +59,27 @@ struct lruvec {
 #endif
 };
 
+|-->交换区的数据结构 //(swap.h)
+|-->每个交换区都由一组页槽（page slot）组成，每个页槽大小一页。交换区的第一个页槽永久存放有关交换区的信息
+union swap_header {
+	struct {
+        char reserved[PAGE_SIZE - 10];
+        char magic[10];         /* SWAP-SPACE or SWAPSPACE2  用于标记分区或文件为交换区*/
+    } magic;
+    struct {
+        char        bootbits[1024]; /* Space for disklabel etc. 包含分区数据、磁盘标签等*/
+        __u32       version; //交换算法的版本
+        __u32       last_page; //可有效使用的最后一个槽
+        __u32       nr_badpages; //有缺陷的页槽的个数
+        unsigned char   sws_uuid[16];
+        unsigned char   sws_volume[16];
+        __u32       padding[117]; //用于填充的字节
+        __u32       badpages[1]; //用来指定有缺陷的页槽的位置
+    } info;
+};
+
+
+
 |-->mmap_mem //(drivers/char/mem.c) mmap的实现
 	|-->remap_pfn_range //(memory.c)
 		|-->pgd_addr_end //(memory.c)
@@ -229,6 +250,34 @@ struct lruvec {
 
 |-->__perform_reclaim //(page_alloc.c)
 
+|-->init_swap_address_space //(swap_state.c) 初始化全局变量struct address_space
+	|-->INIT_RADIX_TREE(&space->page_tree, GFP_ATOMIC|__GFP_NOWARN) //(radix-tree.h)
+		|-->(root)->gfp_mask = (mask) //(radix-tree.h)
+		|-->(root)->rnode = NULL //(radix-tree.h)
+	
+	|-->space->a_ops = &swap_aops; //(swap_state.c)
+		|-->.writepage  = swap_writepage //(swap_state.c)
+			|-->swap_writepage //(page_io.c)
+				|-->try_to_free_swap //()
+				|-->__swap_writepage //(page_io.c)
+					|-->bdev_write_page //(fs/block_dev.c)
+						|-->ops->rw_page //(block_dev.c) 
+							|-->.rw_page = zram_rw_page //(zram_drv.c)
+								|-->zram_rw_page //(zram_drv.c)
+									|-->zram_bvec_rw //(zram_drv.c)
+										|-->zram_bvec_read //()
+										|-->zram_bvec_write //(zram_drv.c)
+											|-->__zram_bvec_write //(zram_drv.c)
+												|-->zcomp_compress //()
+												|-->zs_malloc //()
+												|-->zs_map_object //()
+												|-->memcpy(dst, src, comp_len); //()
+		
+		|-->.set_page_dirty = swap_set_page_dirty //(swap_state.c)
+		|-->.migratepage    = migrate_page //(swap_state.c)
+		
+	|-->mapping_set_no_writeback_tags(space) //
+
 |-->alloc_page_buffers //(buffer.c)
 	|-->free_more_memory //(buffer.c)
 		|-->try_to_free_pages //(vmscan.c)
@@ -250,8 +299,28 @@ struct lruvec {
 									|-->shrink_page_list //(vmscan.c) 遍历page_list中所有的page
 										|-->if(PageAnon(page))
 											|-->add_to_swap //(swap_state.c) 分配一个新页槽，并把叶框插入swap cache
-												|-->get_swap_page //()
-												|-->add_to_swap_cache //()
+												|-->get_swap_page //(swap_slots.c) 分配一个新页槽，并传递给add_to_swap_cache()。页槽结构体中的val(long)包含SWAP_TYPE，以及swap_info[]的index
+													|-->get_swap_pages //(swapfile.c)
+														|-->swap_alloc_cluster //()
+														|-->scan_swap_map_slots //(swapfile.c)
+												
+												|-->add_to_swap_cache //(swap_state.c)
+													|-->radix_tree_maybe_preload_order //()
+													|-->__add_to_swap_cache //(swap_state.c)
+														|-->page_ref_add //(page_ref.h) 增加page的引用计数
+														|-->swap_address_space //()
+														|-->radix_tree_insert //(radix-tree.h) 基数树，擅长记录key-value，用于管理交换区
+															|-->__radix_tree_insert //(radix-tree.c)
+																|-->radix_tree_is_internal_node //(radix-tree.h) 做校验检查
+																|-->__radix_tree_create //(radix-tree.c)
+																	|-->
+																
+																|-->insert_entries //(radix-tree.c)
+																	|-->node_to_entry //()
+																	|-->radix_tree_exceptional_entry //()
+													
+													|-->radix_tree_preload_end //()
+													
 												|-->
 
 										|-->if(page_mapped(page)) 对全部映射了该页的进程执行取消映射的操作
