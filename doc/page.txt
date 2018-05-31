@@ -2,6 +2,64 @@
 
 |-->mark_page_accessed //(swap.c) 处理页标记，将其标记为访问过的页面
 
+
+|-->kswapd 线程，用于定期维护回收页框
+|-->kswapd_run //(vmscan.c)
+	|-->pgdat->kswapd = kthread_run(kswapd, pgdat, "kswapd%d", nid) //(vmscan.c)
+		|-->kswapd //(vmscan.c)
+			|-->try_to_freeze //(freezer.h)
+				|-->try_to_freeze_unsafe //(freezer.h)
+					|-->freezing //(freezer.h)
+						|-->freezing_slow_path //(freezer.c)
+							|-->
+
+			|-->balance_pgdat //(vmscan.c)
+				|-->kswapd_shrink_node //(vmscan.c)
+					|-->shrink_node //(vmscan.c)
+
+|-->cache_reap高速缓存回收页框 内核的2种方式之一，另一种是kswapd内核线程
+|-->start_cpu_timer //(slab.c)
+	|-->INIT_DEFERRABLE_WORK(reap_work, cache_reap)//(slab.c)
+		|-->cache_reap //(slab.c)
+			|-->drain_freelist //(slab.c)
+				|-->list_entry(p, struct page, lru) //(slab.c)
+				|-->list_del(&page->lru) //(slab.c)
+				|-->slab_destroy //(slab.c)
+					|-->kmem_freepages //(slab.c)
+						|-->__free_pages //(page_alloc.c)
+							|-->free_hot_cold_page //()
+							|-->__free_pages_ok //(page_alloc.c)
+								|-->free_one_page //(age_alloc.c)
+									|-->__free_one_page //(page_alloc.c)
+										|-->
+
+					|-->kmem_cache_free //()
+
+|-->work_struct //(include/linux/workqueue.h)
+|-->typedef void (*work_func_t)(struct work_struct *work); //(include/linux/workqueue.h)
+struct work_struct {
+    atomic_long_t data;
+    struct list_head entry;
+    work_func_t func;
+#ifdef CONFIG_LOCKDEP
+    struct lockdep_map lockdep_map;
+#endif
+};
+
+|-->delayed_work //(include/linux/workqueue.h)
+struct delayed_work {
+    struct work_struct work;
+    struct timer_list timer;
+
+    /* target workqueue and CPU ->timer uses to queue ->work */
+    struct workqueue_struct *wq;
+    int cpu;
+};
+
+|-->out_of_memory //(oom_kill.c)
+	|-->select_bad_process //(oom_kill.c)
+	|-->oom_kill_process //(oom_kill.c)
+
 |-->page_referenced //(rmap.c)
 	|-->.rmap_one = page_referenced_one //(rmap.c)
 	|-->rwc.invalid_vma = invalid_page_referenced_vma //(rmap.c)
@@ -235,11 +293,6 @@ union swap_header {
 		
 	|-->page_mapcount //(mm.h)
 		|-->tomic_read(&page->_mapcount) //读取_mapcount的数值+1，表示当前的页是否为共享
-
-|-->kswapd //(vmscan.c)
-	|-->balance_pgdat //(vmscan.c)
-		|-->kswapd_shrink_node //(vmscan.c)
-			|-->shrink_node //(vmscan.c)
 
 
 |-->alloc_pages_node //(gfp.h)
