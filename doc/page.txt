@@ -1,6 +1,72 @@
+|-->交换高速缓存
+	|-->lookup_swap_cache //(swap_state.c) 
+		|-->
+
+	|-->add_to_swap_cache //(swap_state.c) 把页插入交换高速缓存中 见下面的流程分析
+		|-->
+
+	|-->__add_to_swap_cache //(swap_state.c) 
+
+	|-->delete_from_swap_cache //(swap_state.c)
+
+	|-->
+
+|-->换入页
+	|-->do_swap_page //(memory.c)
+		|-->pte_unmap_same //()
+		|-->pte_to_swp_entry //()
+		|-->lookup_swap_cache //()
+		|-->ksm_might_need_to_copy //()
+		|-->mem_cgroup_try_charge //()
+		|-->mk_pte //()
+		|-->flush_icache_page //()
+		|-->pte_swp_soft_dirty //()
+		|-->pte_mksoft_dirty //()
+		|-->activate_page //()
+		|-->lru_cache_add_active_or_unevictable //()
+		|-->swap_free //()
+		|-->update_mmu_cache //()
+
+
 |-->do_anonymous_page //(memory.c) 加载匿名页
 
 |-->mark_page_accessed //(swap.c) 处理页标记，将其标记为访问过的页面
+
+|-->try_to_unuse //(swapfile.c)
+	|-->start_mm = &init_mm; //(init-mm.c)
+	|-->mmget //(mm.h)
+	|-->read_swap_cache_async //(swap_state.c)
+		|-->__read_swap_cache_async //(swap_state.c)
+			|-->find_get_page //()
+			|-->alloc_page_vma //()
+			|-->radix_tree_maybe_preload //()
+			|-->swapcache_prepare //()
+			|-->__add_to_swap_cache //()
+			|-->radix_tree_preload_end //()
+			|-->lru_cache_add_anon //()
+
+
+|-->SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags) //(swapfile.c) 对创建交换区时放入第一个页槽中的swap_header联合体字段进行检查
+	|-->alloc_swap_info //(swapfile.c) 分配一个内存，并进行初始化
+	|-->INIT_WORK(&p->discard_work, swap_discard_work) //(swapfile.c) 将discard_work进行赋值
+	|-->file_open_name //(open.c)
+	|-->claim_swapfile //(swapfile.c)
+	|-->read_mapping_page //()
+	|-->read_swap_header //(swapfile.c)
+		|-->if (memcmp("SWAPSPACE2", swap_header->magic.magic, 10)) //(swapfile.c) 判断magic是否为SWAPSPACE2
+			|-->return 0;
+
+		|-->p->lowest_bit  = 1 //
+		|-->p->highest_bit = maxpages - 1; //
+
+	|-->vzalloc //(nommu.c) 创建与新交换区相关的计数器数组，并把它的地址存放在交换描述符的swap_map字段中，还要根据swap_header联合体的info.bad_pages字段中存放的有缺陷的页槽链表把这个数组的元素初始化为0或者SWAP_MAP_BAD
+		|-->__vmalloc //(nommu.c)
+			|-->kmalloc //(slab.h)
+				|-->__kmalloc //(slab.c)
+					|-->__do_kmalloc //(slab.c)
+						|-->kmalloc_slab //()
+						|-->slab_alloc //()
+						|-->kasan_kmalloc //()
 
 
 |-->kswapd 线程，用于定期维护回收页框
@@ -379,7 +445,13 @@ union swap_header {
 										|-->if(page_mapped(page)) 对全部映射了该页的进程执行取消映射的操作
 											|-->try_to_unmap //()
 
-										|-->pageout //() 对所有的脏页执行write back
+										|-->pageout //(vmscan.c) 对所有的脏页执行write back
+											|-->.writepage  = swap_writepage //(swap_state.c)
+												|-->swap_writepage //(page_io.c)
+													|-->try_to_free_swap //()
+													|-->frontswap_store //()
+													|-->__swap_writepage //(page_io.c)
+														|-->
 
 									|-->free_hot_cold_page_list //(vmscan.c) 
 
