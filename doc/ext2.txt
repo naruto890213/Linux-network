@@ -1,0 +1,163 @@
+|-->ext2超级块数据结构 (fs/ext2/ext2.h)
+	|-->struct ext2_super_block {
+		__le32  s_inodes_count; //索引节点总数
+		__le32  s_r_blocks_count; //保留的块数
+    	__le32  s_free_blocks_count; //空闲块大小
+    	__le32  s_free_inodes_count; //空闲索引节点计数器   /* Free inodes count */
+    	__le32  s_first_data_block; //第一个使用的块号(总为1)
+    	__le32  s_log_block_size;   //日志块的大小
+    	__le32  s_log_frag_size;    //日志片的大小
+    	__le32  s_blocks_per_group; //每组中的块数
+    	__le32  s_frags_per_group;  //每组中的片数
+    	__le32  s_inodes_per_group; //每组中的索引节点数
+    	__le32  s_mtime;        //最后一次安装操作的时间
+    	__le32  s_wtime;        //最后一次写操作的时间
+    	__le16  s_mnt_count;    //安装操作计数器
+    	__le16  s_max_mnt_count;    /* Maximal mount count */
+    	__le16  s_magic;        /* Magic signature */
+    	__le16  s_state;        /* File system state */
+    	__le16  s_errors;       /* Behaviour when detecting errors */
+    	__le16  s_minor_rev_level;  /* minor revision level */
+    	__le32  s_lastcheck;        /* time of last check */
+    	__le32  s_checkinterval;    /* max. time between checks */
+    	__le32  s_creator_os;       /* OS */
+    	__le32  s_rev_level;        /* Revision level */
+    	__le16  s_def_resuid;       /* Default uid for reserved blocks */
+    	__le16  s_def_resgid;
+		__le32  s_first_ino;        /* First non-reserved inode */
+    	__le16   s_inode_size;      /* size of inode structure */
+    	__le16  s_block_group_nr;   /* block group # of this superblock */
+    	__le32  s_feature_compat;   /* compatible feature set */
+    	__le32  s_feature_incompat;     /* incompatible feature set */
+    	__le32  s_feature_ro_compat;    /* readonly-compatible feature set */
+    	__u8    s_uuid[16];     /* 128-bit uuid for volume */
+    	char    s_volume_name[16];  /* volume name */
+    	char    s_last_mounted[64];     /* directory where last mounted */
+    	__le32  s_algorithm_usage_bitmap; /* For compression */
+    	/*
+    	 * Performance hints.  Directory preallocation should only
+    	 * happen if the EXT2_COMPAT_PREALLOC flag is on.
+    	 */
+    	__u8    s_prealloc_blocks;  /* Nr of blocks to try to preallocate*/
+    	__u8    s_prealloc_dir_blocks;  /* Nr to preallocate for dirs */
+    	__u16   s_padding1;
+		__u8    s_journal_uuid[16]; /* uuid of journal superblock */
+    	__u32   s_journal_inum;     /* inode number of journal file */
+    	__u32   s_journal_dev;      /* device number of journal file */
+    	__u32   s_last_orphan;      /* start of list of inodes to delete */
+    	__u32   s_hash_seed[4];     /* HTREE hash seed */
+    	__u8    s_def_hash_version; /* Default hash version to use */
+    	__u8    s_reserved_char_pad;
+    	__u16   s_reserved_word_pad;
+    	__le32  s_default_mount_opts;
+    	__le32  s_first_meta_bg;    /* First metablock block group */
+    	__u32   s_reserved[190];
+	};
+
+|-->组描述符和位图 //(fs/ext2/ext2.h)
+	|-->struct ext2_group_desc
+		{
+		    __le32  bg_block_bitmap;  //块位图的块号
+		    __le32  bg_inode_bitmap;  //索引节点位图的块号
+		    __le32  bg_inode_table;   //第一个索引节点表块的块号
+		    __le16  bg_free_blocks_count; //组中空闲块的个数
+		    __le16  bg_free_inodes_count; //组中空闲索引节点的个数
+		    __le16  bg_used_dirs_count; //组中目录的个数
+		    __le16  bg_pad; //按字对齐
+		    __le32  bg_reserved[3]; //填充对齐
+		};
+
+|-->索引节点表 //(fs/ext2/ext2.h)
+	|-->struct ext2_inode {
+    	__le16  i_mode;  //文件类型和访问权限 
+    	__le16  i_uid;   //拥有者标示符
+    	__le32  i_size;  //以字节为单位的文件长度
+    	__le32  i_atime; //最后一次访问文件的时间
+    	__le32  i_ctime; //索引节点最后改变的时间
+    	__le32  i_mtime; //文件内容最后改变的时间
+    	__le32  i_dtime; //文件删除的时间
+    	__le16  i_gid;   //用户组标识符
+    	__le16  i_links_count;  //硬连接数
+    	__le32  i_blocks;   //文件的数据库数
+    	__le32  i_flags;    //文件标志
+    	union {
+    	    struct {
+    	        __le32  l_i_reserved1;
+    	    } linux1;
+    	    struct {
+    	        __le32  h_i_translator;
+    	    } hurd1;
+    	    struct {
+    	        __le32  m_i_reserved1;
+    	    } masix1;
+    	} osd1;             /* OS dependent 1 */
+    	__le32  i_block[EXT2_N_BLOCKS];//指向数据块的指针
+    	__le32  i_generation;   //文件版本(当网络文件系统访问文件时使用)
+    	__le32  i_file_acl; //文件访问控制列表
+    	__le32  i_dir_acl;  //目录访问控制列表
+    	__le32  i_faddr; //片的地址
+		union {
+    	    struct {
+    	        __u8    l_i_frag;   /* Fragment number */
+    	        __u8    l_i_fsize;  /* Fragment size */
+    	        __u16   i_pad1;
+    	        __le16  l_i_uid_high;   /* these 2 fields    */
+    	        __le16  l_i_gid_high;   /* were reserved2[0] */
+    	        __u32   l_i_reserved2;
+    	    } linux2;
+    	    struct {
+    	        __u8    h_i_frag;   /* Fragment number */
+    	        __u8    h_i_fsize;  /* Fragment size */
+    	        __le16  h_i_mode_high;
+    	        __le16  h_i_uid_high;
+    	        __le16  h_i_gid_high;
+    	        __le32  h_i_author;
+    	    } hurd2;
+    	    struct {
+    	        __u8    m_i_frag;   /* Fragment number */
+    	        __u8    m_i_fsize;  /* Fragment size */
+    	        __u16   m_pad1;
+    	        __u32   m_i_reserved2[2];
+    	    } masix2;
+    	} osd2;  //特定的操作系统信息
+	};
+
+|-->ext2文件系统挂载流程
+	|-->.mount      = ext2_mount //(fs/ext2/super.c)
+		|-->ext2_mount //(fs/ext2/super.c)
+			|-->ext2_fill_super //(super.c)
+				|-->kzalloc //(super.c) 分配一个ext2_sb_info描述符
+				|-->sb->s_fs_info = sbi //将其地址当作参数传递并存放在超级块s_fs_info字段
+				|-->sb_bread //() 在缓冲区页中分配一个缓冲区和缓冲区首部
+				|-->
+
+	
+|-->创建索引节点//(fs/ext2/ialloc.c)
+	|-->ext2_new_inode //(ialloc.c)
+		|-->new_inode //(inode.c)
+		|-->find_group_orlov //(ialloc.c) 对目录进行查询
+		|-->find_group_other //(ialloc.c) 对非目录进行查询
+		|-->read_inode_bitmap //(ialloc.c) 
+		|-->dquot_initialize //
+		|-->dquot_alloc_inode //
+		|-->ext2_init_acl //
+		|-->ext2_init_security //
+		|-->mark_inode_dirty //
+		|-->ext2_preread_inode //()
+
+|-->删除索引节点 //(fs/ext2/ialloc.c)
+	|-->ext2_free_inode //(ialloc.c)
+		|-->dquot_free_inode //()
+		|-->dquot_drop //()
+		|-->read_inode_bitmap //()
+		|-->ext2_release_inode //(ialloc.c)
+			|-->ext2_get_group_desc //()
+			|-->mark_buffer_dirty //(buffer.c)
+				|-->
+
+		|-->mark_buffer_dirty //()
+		|-->sync_dirty_buffer //()
+		|-->brelse //(buffer_head.h)
+			|-->__brelse //(buffer.c)
+				|-->
+
