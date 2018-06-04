@@ -1,0 +1,79 @@
+|-->pipe 数据结构体 //(pipe_fs_i.h)
+	|-->struct pipe_inode_info {
+			struct mutex mutex;
+			wait_queue_head_t wait; //管道/FIFO等待队列
+			unsigned int nrbufs, curbuf, buffers; //包含待读数据的缓冲区数、包含待读数据的第一个缓冲区的索引、包含待读的buffer
+			unsigned int readers; //读进程的标志或者编号
+			unsigned int writers; //写进程的标志或者编号
+			unsigned int files;
+			unsigned int waiting_writers;
+			unsigned int r_counter; //与readers类似，但当等待读取FIFO的进程时使用
+			unsigned int w_counter; //与writers类似，但当等待写入FIFO的进程时使用
+			struct page *tmp_page;
+			struct fasync_struct *fasync_readers; //用于通过信号进行的异步IO通知
+			struct fasync_struct *fasync_writers; //用于通过信号进行的异步IO通知
+			struct pipe_buffer *bufs;
+			struct user_struct *user;
+		};
+		
+|-->pipe_buffer 数据结构体 //(pipe_fs_i.h)
+	|-->struct pipe_buffer {
+			struct page *page; //管道缓冲区页框的描述符地址
+			unsigned int offset, len; //页框内有效数据的当前位置、长度
+			const struct pipe_buf_operations *ops; //管道缓冲区方法表的地址
+			unsigned int flags; //标志
+			unsigned long private;
+		};
+
+|-->pipe_write //(fs/pipe.c)		
+	|-->buf->ops = &anon_pipe_buf_ops //(fs/pipe.c)
+		|-->anon_pipe_buf_ops //(pipe.c)
+			|-->static const struct pipe_buf_operations anon_pipe_buf_ops = {
+					.can_merge = 1, 
+					.confirm = generic_pipe_buf_confirm,
+					.release = anon_pipe_buf_release,
+					.steal = anon_pipe_buf_steal,
+					.get = generic_pipe_buf_get,
+				};
+				
+|-->pipefifo_fops//
+
+|-->pipe 文件系统初始化
+	|-->init_pipe_fs //(pipe.c)
+	
+|-->pipe 创建
+	|-->SYSCALL_DEFINE1(pipe, int __user *, fildes) //(pipe.c)
+		|-->sys_pipe2 //(pipe.c)
+			|-->SYSCALL_DEFINE2(pipe2, int __user *, fildes, int, flags) //(pipe.c)
+				|-->__do_pipe_flags //(pipe.c)
+					|-->create_pipe_files //(pipe.c)
+						|-->get_pipe_inode //(pipe.c)
+							|-->new_inode_pseudo //()
+							|-->get_next_ino //()
+							|-->alloc_pipe_info //()
+							|-->inode->i_fop = &pipefifo_fops //(pipe.c)
+								|-->const struct file_operations pipefifo_fops = {
+										.open       = fifo_open,
+										.llseek     = no_llseek,
+										.read_iter  = pipe_read,
+										.write_iter = pipe_write,
+										.poll       = pipe_poll,
+										.unlocked_ioctl = pipe_ioctl,
+										.release    = pipe_release,
+										.fasync     = pipe_fasync,
+									};
+							
+						|-->mntget //()
+						|-->alloc_file(&path, FMODE_WRITE, &pipefifo_fops) //
+						|-->path_get //()
+					
+					|-->get_unused_fd_flags //(pipe.c)
+					|-->audit_fd_pair //(pipe.c)
+					
+					
+|-->pipe从管道中读取数据 //(pipe.c)
+	|-->pipe_read //(pipe.c)
+		|-->pipe_buf_confirm //()
+		|-->copy_page_to_iter //()
+		|-->if (!buf->len)
+			|-->pipe_buf_release //()
