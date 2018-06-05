@@ -95,3 +95,132 @@
 			
 	|-->pipe_write //(pipe.c) 向管道写入数据
 		|-->
+
+---------------------------------------------------------------------------------------------------
+
+|-->pipe //(fs/pipe.c) 有名管道
+	|-->const struct file_operations pipefifo_fops = {
+		    .open       = fifo_open,
+		    .llseek     = no_llseek,
+		    .read_iter  = pipe_read,
+		    .write_iter = pipe_write,
+		    .poll       = pipe_poll,
+		    .unlocked_ioctl = pipe_ioctl,
+		    .release    = pipe_release,
+		    .fasync     = pipe_fasync,
+		};
+
+		|-->fifo_open //(pipe.c)
+			|-->
+
+
+|-->System V IPC//()
+	|-->struct ipc_ids {
+		    int in_use; //已分配IPC资源
+		    unsigned short seq; //xiayige分配的位置使用序号
+		    struct rw_semaphore rwsem; //
+		    struct idr ipcs_idr; //
+		    int next_id; //
+		};
+
+	|-->struct idr { //(idr.h)
+    		struct radix_tree_root  idr_rt;
+    		unsigned int        idr_next;
+		};
+
+	|-->struct rw_semaphore { //(rwsem-spinlock.h)
+		    __s32           count;
+		    raw_spinlock_t      wait_lock;
+		    struct list_head    wait_list;
+		#ifdef CONFIG_DEBUG_LOCK_ALLOC
+		    struct lockdep_map dep_map;
+		#endif
+		};
+
+	|-->struct kern_ipc_perm {
+		    spinlock_t  lock;
+		    bool        deleted;
+		    int     id; 
+		    key_t       key;
+		    kuid_t      uid;
+		    kgid_t      gid;
+		    kuid_t      cuid;
+		    kgid_t      cgid;
+		    umode_t     mode;
+		    unsigned long   seq;
+		    void        *security;
+		} ____cacheline_aligned_in_smp;
+	
+	|-->SYSCALL_DEFINE6(ipc, unsigned int, call, int, first, unsigned long, second,
+        unsigned long, third, void __user *, ptr, long, fifth) //(ipc/syscall.c)
+		|-->case SEMGET
+			|-->sys_semget //(syscall.c)
+				|-->SYSCALL_DEFINE3(semget, key_t, key, int, nsems, int, semflg) //(sem.c)
+					|-->static const struct ipc_ops sem_ops = {
+    					    .getnew = newary,
+    					    .associate = sem_security,
+    					    .more_checks = sem_more_checks,
+    					};
+
+					|-->ipcget //(util.c)
+						|-->if (params->key == IPC_PRIVATE)
+							|-->ipcget_new //(util.c)
+								|-->ops->getnew //(util.c)
+									|-->newary //(sem.c)
+										|-->ipc_rcu_alloc //()
+										|-->security_sem_alloc //()
+										|-->ipc_addid //(util.c)
+											|-->ipc_buildid //(util.h)
+												|-->return SEQ_MULTIPLIER * seq + id
+
+										|-->sma->sem_perm.id //()
+
+						|-->else
+							|-->ipcget_public //(util.c)
+								|-->ipc_findkey //(util.c)
+									|-->idr_find //(idr.h)
+										|-->radix_tree_lookup //(radix-tree.c)
+											|-->__radix_tree_lookup //()
+
+									|-->return ipc //(util.c)
+
+								|-->ops->more_checks //(util.c)
+									|-->sem_more_checks //(sem.c)
+										|-->sem_security //(sem.c)
+
+									|-->ipc_check_perms //(util.c)
+										|-->ipcperms //(util.c)
+											|-->security_ipc_permission //(security.c)
+												|-->call_int_hook //()
+
+										|-->ops->associate //(util.c)
+											|-->sem_security //(sem.c)
+												|-->security_sem_associate //(security.c)
+													|-->call_int_hook //
+
+		|-->case SEMCTL
+			|-->sys_semctl //(syscall.c)
+
+		|-->MSGSND
+			|-->sys_msgsnd //(syscall.c)
+
+		|-->MSGRCV
+			|-->sys_msgrcv //(syscall.c)
+	
+		|-->MSGGET 
+			|-->sys_msgget //(syscall.c)
+
+		|-->MSGCTL
+			|-->sys_msgctl //(syscall.c)
+
+		|-->SHMAT
+			|-->do_shmat //(syscall.c)
+
+		|-->SHMDT
+			|-->sys_shmdt //(syscall.c)
+
+		|-->SHMGET
+			|-->sys_shmget //(syscall.c)
+
+		|-->SHMCTL
+			|-->sys_shmctl //(syscall.c)
