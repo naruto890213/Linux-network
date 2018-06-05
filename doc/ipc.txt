@@ -71,9 +71,27 @@
 					|-->audit_fd_pair //(pipe.c)
 					
 					
-|-->pipe从管道中读取数据 //(pipe.c)
-	|-->pipe_read //(pipe.c)
-		|-->pipe_buf_confirm //()
-		|-->copy_page_to_iter //()
+|-->pipe //(pipe.c)
+	|-->pipe_read //(pipe.c) 从管道中读取数据
+		|-->pipe_buf_confirm //(pipe_fs_i.h)
+			|-->buf->ops->confirm //(pipe_fs_i.h)
+				|-->page_cache_pipe_buf_confirm //(pipe.c)
+					|-->return 0 //(pipe.c)
+		
+		|-->copy_page_to_iter //(iov_iter.c)
+			|-->page_copy_sane //()
+			|-->copy_page_to_iter_pipe //(iov_iter.c)
+				|-->buf->ops = &page_cache_pipe_buf_ops //(splice.c)
+					|-->const struct pipe_buf_operations page_cache_pipe_buf_ops = {
+							.can_merge = 0,
+							.confirm = page_cache_pipe_buf_confirm,
+							.release = page_cache_pipe_buf_release,
+							.steal = page_cache_pipe_buf_steal,
+							.get = generic_pipe_buf_get,
+						};
+		
 		|-->if (!buf->len)
 			|-->pipe_buf_release //()
+			
+	|-->pipe_write //(pipe.c) 向管道写入数据
+		|-->
