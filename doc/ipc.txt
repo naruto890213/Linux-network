@@ -216,6 +216,22 @@
 			struct task_struct  *shm_creator;
 			struct list_head    shm_clist;  /* list by creator */
 		} __randomize_layout;
+
+	|-->static const struct file_operations shm_file_operations = { //(shm.c)
+		    .mmap       = shm_mmap,
+		    .fsync      = shm_fsync,
+		    .release    = shm_release,
+		    .get_unmapped_area  = shm_get_unmapped_area,
+		    .llseek     = noop_llseek,
+		    .fallocate  = shm_fallocate,
+		};
+
+	|-->struct shm_file_data { //(shm.c)
+		    int id;
+		    struct ipc_namespace *ns;
+		    struct file *file;
+		    const struct vm_operations_struct *vm_ops;
+		};
 		
 	|-->SYSCALL_DEFINE6(ipc, unsigned int, call, int, first, unsigned long, second,
         unsigned long, third, void __user *, ptr, long, fifth) //(ipc/syscall.c)
@@ -291,8 +307,18 @@
 			|-->do_shmat //(syscall.c)
 				|-->SYSCALL_DEFINE3(shmat, int, shmid, char __user *, shmaddr, int, shmflg) //(shm.c)
 					|-->do_shmat //(shm.c)
+						|-->alloc_file(&path, f_mode, is_file_hugepages(shp->shm_file) ? &shm_file_operations_huge : &shm_file_operations) //(file_table.c)
+							|-->file->f_op = fop //(file_table.c) 将文件操作指针进行赋值操作
+
 						|-->do_mmap_pgoff //(mm.h)
 							|-->do_mmap //(mmap.c)
+								|-->mmap_region //(mmap.c)
+									|-->call_mmap //(fs.h)
+										|-->file->f_op->mmap(file, vma) //(fs.h)
+											|-->shm_mmap //(shm.c)
+												|-->shm_file_data //()
+												|-->__shm_open //()
+												|-->
 
 		|-->SHMDT
 			|-->sys_shmdt //(syscall.c)
