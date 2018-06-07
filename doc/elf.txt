@@ -1,0 +1,149 @@
+|-->ELF结构体格式
+#define EI_NIDENT16 
+
+Elf32_Addr		4  4  无符号地址
+Elf32_Half  	2  2  无符号半整型
+Elf32_Off		4  4  无符号文件偏移量
+Elf32_Sword		4  4  有符号整型
+Elf32_Word  	4  4  无符号整型
+unsigned char  	1  1  无符号短整型
+
+|-->typedef struct{ 
+	unsigned char 	e_ident[EI_NIDENT]; 
+	Elf32_Half 		e_type; 
+	Elf32_Half 		e_machine; 
+	Elf32_Word 		e_version; 
+	Elf32_Addr 		e_entry; 
+	Elf32_Off 		e_phoff; 
+	Elf32_Off 		e_shoff; 
+	Elf32_Word 		e_flags; 
+	Elf32_Half 		e_ehsize; 
+	Elf32_Half 		e_phentsize; 
+	Elf32_Half 		e_phnum; 
+	Elf32_Half 		e_shentsize; 
+	Elf32_Half 		e_shnum; 
+	Elf32_Half 		e_shstrndx; 
+} Elf32_Ehdr;
+
+|-->e_ident//最开始处的这16个字节含有ELF文件的识别标志，并且提供了一些用于解码和解析文件内容的数据，是不依赖于具体操作系统的
+e_ident[]数组各个索引位置的含义
+名字  		值	用途
+EI_MAG0  	0  	文件标志
+EI_MAG1  	1  	文件标志
+EI_MAG2  	2  	文件标志
+EI_MAG3  	3  	文件标志
+EI_CLASS  	4  	文件类别
+EI_DATA  	5  	编码格式
+EI_VERSION  6  	文件版本
+EI_PAD  	7  	补齐字节开始位置
+EI_NIDENT  	16  e_ident[]数组的大小
+
+文件的最前面4字节e_ident[EI_MAG0] ~ e_ident[EI_MAG3]的内容被称为“魔数”，用于标识这是一个ELF文件。这四个字节存放的内容是固定的
+
+名字  		值  	意义
+ELFMAG0		0x7f  	e_ident[EI_MAG0] 
+ELFMAG1  	‘E’  	e_ident[EI_MAG1] 
+ELFMAG2  	‘L’  	e_ident[EI_MAG2] 
+ELFMAG3  	‘F’  	e_ident[EI_MAG3]
+
+执行程序的16进制如下：
+0000000: 7f45 4c46 0201 0100 0000 0000 0000 0000
+对应上面的解析分别为0x7f 0x45('E') 0x4c('L') 0x46('F')
+
+|-->EI_CLASS //接下来的一个字节e_ident[EI_CLASS]指明文件的类型，或者说容量:
+名字  			值	意义
+ELFCLASSNONE  	0  	非法目标文件
+ELFCLASS32  	1  	32位目标文件
+ELFCLASS64  	2  	64位目标文件
+
+对应上面的解析为0x02 既为64位目标文件
+
+|-->EI_DATA //再下面的一个字节e_ident[EI_DATA]指明了目标文件中的数据编码格式，目前支持以下几种
+名字  		值	意义
+ELFDATANONE	0  	非法编码格式
+ELFDATA2LSB	1  	LSB编码(小头编码) 
+ELFDATA2MSB	2  	MSB编码(大头编码)
+对应上面的解析为0x01 即小头编码
+
+|-->EI_VERSION //接下来的字节e_ident[EI_VERSION]指明ELF文件头的版本，目前这个版本号是EV_CURRENT，即“1”
+对应上面的解析分别为0x01 
+
+|-->EI_PAD //从e_ident[EI_PAD]到e_ident[EI_NIDENT-1]之间的9个字节目前暂时不使用，留作以后扩展，在实际的文件中应被填0补充，其它程序在读取ELF文件头时应该忽略这些字节。如果以后ELF文件头的内容被扩展，这9个字节中有一些被使用起来的话，EI_PAD将被定义得更大
+
+
+-------------------------------------------------------------------------------------------------
+第二个16位的16进制如下：
+0000010: 0200 3e00 0100 0000 1005 4000 0000 0000
+
+|-->e_type //此字段表明本目标文件属于哪种类型
+名字  		值		意义
+ET_NONE  	0  		未知文件类型
+ET_REL  	1  		可重定位文件
+ET_EXEC  	2  		可执行文件
+ET_DYN  	3  		动态链接库文件
+ET_CORE  	4  		Core文件
+ET_LOPROC  	0xff00  特定处理器文件扩展下边界
+ET_HIPROC  	0xffff  特定处理器文件扩展上边界
+对应上面的解析为:0200 0x02 即当前的文件为可执行文件
+
+|-->e_machine //此字段用于指定该文件适用的处理器体系结构。
+名字  			值  	意义
+EM_NONE  		0  		未知体系结构
+EM_M32  		1  		AT&T WE 32100
+EM_SPARC  		2  		SPARC 
+EM_386  		3  		Intel Architecture 
+EM_68K  		4  		Motorola 68000 
+EM_88K  		5  		Motorola 88000 
+EM_860  		7  		Intel 80860 
+EM_MIPS  		8  		MIPS RS3000 Big-Endian 
+EM_MIPS_RS4-BE  10  	MIPS RS4000 Big-Endian 
+RESERVED  		11~16	保留未用
+对应上面的解析为0x3e	即未知体系结构
+
+|-->e_version //此字段指明目标文件的版本
+名字  		值	意义
+EV_NONE  	0  	非法版本号
+EV_CURRENT  1  	当前版本号
+对应上面的解析为0100 0000  小端的所以值为0x01 当前版本号
+
+|-->e_entry //此字段指明程序入口的虚拟地址。即当文件被加载到进程空间里后，入口程
+序在进程地址空间里的地址。对于可执行程序文件来说，当ELF文件完成加载之后，程序将
+从这里开始运行；而对于其它文件来说，这个值应该是0。
+
+对应上面的解析为:1005 4000 函数的入口地址：0x400510
+
+|-->e_phoff //此字段指明程序头表(program header table)开始处在文件中的偏移量。如果没有程序头表，该值应设为0。
+对应上面的解析为:0000 0000
+
+第三行16进制如下：
+0000020: 4000 0000 0000 0000 6011 0000 0000 0000
+
+|-->e_shoff //此字段指明节头表(section header table)开始处在文件中的偏移量。如果没有节头表，该值应设为0。
+对应上面的解析为：4000 0000 即0x40
+
+第四行16进制如下：
+0000030: 0000 0000 4000 3800 0900 4000 1e00 1b00
+
+|-->e_flags //此字段含有处理器特定的标志位。标志的名字符合”EF_machine_flag”的格式。对于Intel架构的处理器来说，它没有定义任何标志位，所以e_flags应该为0
+对应上面的解析为：0000 0000 即0x0
+
+|-->e_ehsize //此字段表明ELF文件头的大小，以字节为单位。
+对应上面的解析为: 6011 即0x1160
+
+|-->e_phentsize //此字段表明在程序头表中每一个表项的大小，以字节为单位。
+对应上面的解析为：0000 即0x38
+
+|-->e_phnum //此字段表明程序头表中总共有多少个表项。如果一个目标文件中没有程序头表，该值应设为0。
+对应上面的解析为：0900 即0x09
+
+|-->e_shentsize //此字段表明在节头表中每一个表项的大小，以字节为单位。
+对应上面的解析为：4000 即0x40
+
+|-->e_shnum //此字段表明节头表中总共有多少个表项。如果一个目标文件中没有节头表，该值应设为0
+对应上面的解析为: 1e00 即0x1e
+
+|-->e_shstrndx //节头表中与节名字表相对应的表项的索引。如果文件没有节名字表，此值应设置为SHN_UNDEF。
+对应上面的解析为: 1b00 即0x1b
+
+
+
