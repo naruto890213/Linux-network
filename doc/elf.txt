@@ -1,12 +1,23 @@
 |-->ELF结构体格式
+
+https://github.com/torvalds/linux/blob/master/include/uapi/linux/elf.h#L220
+
 #define EI_NIDENT16 
 
-Elf32_Addr		4  4  无符号地址
-Elf32_Half  	2  2  无符号半整型
-Elf32_Off		4  4  无符号文件偏移量
-Elf32_Sword		4  4  有符号整型
-Elf32_Word  	4  4  无符号整型
-unsigned char  	1  1  无符号短整型
+typedef __u32	Elf32_Addr;
+typedef __u16	Elf32_Half;
+typedef __u32	Elf32_Off;
+typedef __s32	Elf32_Sword;
+typedef __u32	Elf32_Word;
+
+typedef __u64	Elf64_Addr;
+typedef __u16	Elf64_Half;
+typedef __s16	Elf64_SHalf;
+typedef __u64	Elf64_Off;
+typedef __s32	Elf64_Sword;
+typedef __u32	Elf64_Word;
+typedef __u64	Elf64_Xword;
+typedef __s64	Elf64_Sxword;
 
 |-->typedef struct{ 
 	unsigned char 	e_ident[EI_NIDENT]; 
@@ -24,6 +35,23 @@ unsigned char  	1  1  无符号短整型
 	Elf32_Half 		e_shnum; 
 	Elf32_Half 		e_shstrndx; 
 } Elf32_Ehdr;
+
+typedef struct elf64_hdr {
+  unsigned char		e_ident[EI_NIDENT];	/* ELF "magic number" */
+  Elf64_Half 		e_type;
+  Elf64_Half 		e_machine;
+  Elf64_Word 		e_version;
+  Elf64_Addr 		e_entry;		/* Entry point virtual address */
+  Elf64_Off 		e_phoff;		/* Program header table file offset */
+  Elf64_Off 		e_shoff;		/* Section header table file offset */
+  Elf64_Word 		e_flags;
+  Elf64_Half 		e_ehsize;
+  Elf64_Half 		e_phentsize;
+  Elf64_Half 		e_phnum;
+  Elf64_Half 		e_shentsize;
+  Elf64_Half 		e_shnum;
+  Elf64_Half 		e_shstrndx;
+} Elf64_Ehdr;
 
 |-->e_ident//最开始处的这16个字节含有ELF文件的识别标志，并且提供了一些用于解码和解析文件内容的数据，是不依赖于具体操作系统的
 e_ident[]数组各个索引位置的含义
@@ -110,16 +138,16 @@ EV_CURRENT  1  	当前版本号
 序在进程地址空间里的地址。对于可执行程序文件来说，当ELF文件完成加载之后，程序将
 从这里开始运行；而对于其它文件来说，这个值应该是0。
 
-对应上面的解析为:1005 4000 函数的入口地址：0x400510
-
-|-->e_phoff //此字段指明程序头表(program header table)开始处在文件中的偏移量。如果没有程序头表，该值应设为0。
-对应上面的解析为:0000 0000
+对应上面的解析为:1005 4000 0000 0000 函数的入口地址：0x400510
 
 第三行16进制如下：
 0000020: 4000 0000 0000 0000 6011 0000 0000 0000
 
+|-->e_phoff //此字段指明程序头表(program header table)开始处在文件中的偏移量。如果没有程序头表，该值应设为0。
+对应上面的解析为:4000 0000 0000 0000 即0x40
+
 |-->e_shoff //此字段指明节头表(section header table)开始处在文件中的偏移量。如果没有节头表，该值应设为0。
-对应上面的解析为：4000 0000 即0x40
+对应上面的解析为：6011 0000 0000 0000 即0x1160
 
 第四行16进制如下：
 0000030: 0000 0000 4000 3800 0900 4000 1e00 1b00
@@ -128,16 +156,16 @@ EV_CURRENT  1  	当前版本号
 对应上面的解析为：0000 0000 即0x0
 
 |-->e_ehsize //此字段表明ELF文件头的大小，以字节为单位。
-对应上面的解析为: 6011 即0x1160
+对应上面的解析为: 4000 即0x40
 
 |-->e_phentsize //此字段表明在程序头表中每一个表项的大小，以字节为单位。
-对应上面的解析为：0000 即0x38
+对应上面的解析为: 3800 即0x38
 
 |-->e_phnum //此字段表明程序头表中总共有多少个表项。如果一个目标文件中没有程序头表，该值应设为0。
-对应上面的解析为：0900 即0x09
+对应上面的解析为: 0900 即0x09
 
 |-->e_shentsize //此字段表明在节头表中每一个表项的大小，以字节为单位。
-对应上面的解析为：4000 即0x40
+对应上面的解析为: 4000 即0x40
 
 |-->e_shnum //此字段表明节头表中总共有多少个表项。如果一个目标文件中没有节头表，该值应设为0
 对应上面的解析为: 1e00 即0x1e
@@ -146,4 +174,100 @@ EV_CURRENT  1  	当前版本号
 对应上面的解析为: 1b00 即0x1b
 
 
+|-->节
+typedef struct elf32_shdr {
+  Elf32_Word	sh_name;
+  Elf32_Word	sh_type;
+  Elf32_Word	sh_flags;
+  Elf32_Addr	sh_addr;
+  Elf32_Off		sh_offset;
+  Elf32_Word	sh_size;
+  Elf32_Word	sh_link;
+  Elf32_Word	sh_info;
+  Elf32_Word	sh_addralign;
+  Elf32_Word	sh_entsize;
+} Elf32_Shdr;
 
+typedef struct elf64_shdr {
+  Elf64_Word 	sh_name;		/* Section name, index in string tbl */
+  Elf64_Word 	sh_type;		/* Type of section */
+  Elf64_Xword 	sh_flags;		/* Miscellaneous section attributes */
+  Elf64_Addr 	sh_addr;		/* Section virtual addr at execution */
+  Elf64_Off 	sh_offset;		/* Section file offset */
+  Elf64_Xword 	sh_size;		/* Size of section in bytes */
+  Elf64_Word 	sh_link;		/* Index of another section */
+  Elf64_Word 	sh_info;		/* Additional section information */
+  Elf64_Xword 	sh_addralign;	/* Section alignment */
+  Elf64_Xword 	sh_entsize;	/* Entry size if section holds table */
+} Elf64_Shdr;
+
+第5列16进制为：
+0000040: 0600 0000 0500 0000 4000 0000 0000 0000
+|-->sh_name //本节的名字。整个名字的字符串并不存储在这里，它仅是一个索引号，指向“字符串表”节中的某个位置，那里存储了一个以’\0’结尾的字符串。
+对应上面的解析为: 0600 0000 即为0x06
+
+|-->sh_type //本节的类型。下表给出了所有的节类型。
+名字  			值
+SHT_NULL  		0 
+SHT_PROGBITS  	1 
+SHT_SYMTAB  	2 
+SHT_STRTAB  	3 
+SHT_RELA  		4 
+SHT_HASH  		5 
+SHT_DYNAMIC  	6 
+SHT_NOTE  		7 
+SHT_NOBITS  	8 
+SHT_REL  		9 
+SHT_SHLIB  		10 
+SHT_DYNSYM  	11 
+SHT_LOPROC  	0x70000000 
+SHT_HIPROC  	0x7fffffff 
+SHT_LOUSER  	0x80000000 
+SHT_HIUSER  	0xffffffff
+对应上面的解析为: 0500 0000 即为0x05
+此值表明本节包含一张哈希表。所有参与动态连接的目标文件都必须要包含一个符号哈希表。目前，一个目标文件中最多只能有一个哈希表，但这一限制以后可能会取消。
+
+|-->sh_flags //本节的一些属性，由一系列标志比特位组成，各个比特定义了节的不同属性，当某种属性被设置时，相应的标志位被设为1，反之则设为0。未定义的标志位被全部置0。
+以下是这些标志位的列表及含义。
+名字  			值
+SHF_WRITE  		0x1 
+SHF_ALLOC  		0x2 
+SHF_EXECINSTR  	0x4 
+SHF_MASHPROC  	0xf0000000 
+
+对应上面的解析为: 4000 0000 0000 0000
+
+第6行16进制内容如下：
+0000050: 4000 4000 0000 0000 4000 4000 0000 0000
+
+|-->sh_addr //如果本节的内容需要映射到进程空间中去，此成员指定映射的起始地址；如果不需要映射，此值为0。
+对应上面的解析为: 4000 4000 0000 0000 即: 0x400040
+
+|-->sh_offset //指明了本节所在的位置，该值是节的第一个字节在文件中的位置，即相对于
+文件开头的偏移量。单位是字节。如果该节的类型为SHT_NOBITS的话，表明这一节的内容是空的，节并不占用实际的空间，这时sh_offset只代表一个逻辑上的位置概念，并不代表实际的内容。
+对应上面的解析为: 4000 4000 0000 0000 即: 0x400040
+
+第7行16进制内容如下:
+0000060: 3f01 0000 0000 0000 3f01 0000 0000 0000
+
+|-->sh_size //指明节的大小，单位是字节。如果该节的类型为SHT_NOBITS，此值仍然可能为非零，但没有实际的意义。
+对应上面的解析为: 3f01 0000 0000 0000 即: 0x013f
+
+|-->sh_link //此成员是一个索引值，指向节头表中本节所对应的位置。根据节的类型不同，本成员的意义也有所不同，具体见下表。
+对应上面的解析为: 3f01 0000 即:0x013f
+
+|-->sh_info //此成员含有此节的附加信息，根据节的类型不同，本成员的意义也有所不同。
+对于某些节类型来说，sh_link和sh_info含有特殊的信息，见下表。
+
+sh_type  				sh_link  											sh_info 
+SHT_DYNAMIC  			用于本节中项目的字符串表在节头表中相应的索引值		0 
+SHT_HASH  				用于本节中哈希表的符号表在节头表中相应的索引值		0 
+SHT_REL/SHT_RELA 		相应符号表在节头表中的索引值  						本重定位节所应用到目标节在节头表中的索引值
+SHT_SYMTAB/SHT_DYNSYM 	相关字符串表的节头索引  							符号表中最后一个本地符号的索引值加1 
+其它  					SHN_UNDEF  											0 
+对应上面的解析为: 0000 0000 即:0x0
+
+|-->sh_addralign //此成员指明本节内容如何对齐字节，即该节的地址应该向多少个字节对齐。
+比如，在这个节中如果含有一个双字(doubleword)，系统必须保证整个节的内容向
+双字对齐。也就是说，本节内容在进程空间中的映射地址sh_addr必须是一个向sh_addralign对齐，即能被sh_addralign整除的值。目前，sh_addralign只能取0、1
+或者2的正整数倍。如果该值为0或1，表明本节没有字节对齐约束。
