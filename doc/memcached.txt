@@ -1,0 +1,34 @@
+|-->main //(memcached.c)
+	|-->settings_init //()
+	|-->init_lru_maintainer //()
+	|-->event_init //()
+	|-->conn_init //()
+	|-->memcached_thread_init //(thread.c)
+		|-->setup_thread //(thread.c)
+			|-->thread_libevent_process //(thread.c)
+				|-->conn_new //(memcached.c)
+					|-->event_handler //(memcached.c)
+						|-->drive_machine //(memcached.c)
+							|-->case conn_listening
+								|-->accept
+								|-->dispatch_conn_new //(thread.c)
+									|-->item->mode = queue_new_conn //(threads.c)
+									|-->write //写pipe来通知对应的线程
+
+		|-->create_worker(worker_libevent, &threads[i]) //(thread.c)
+			|-->worker_libevent //(thread.c)
+				|-->register_thread_initialized //()
+			
+
+	|-->init_lru_crawler //()
+
+	|-->server_socket_unix //(memcached.c)
+		|-->conn_new //(memcached.c)
+
+	|-->server_sockets //(memcached.c)
+		|-->server_socket //(memcached.c)
+			|-->conn_new //(memcached.c)
+
+	|-->event_base_loop //()
+
+
