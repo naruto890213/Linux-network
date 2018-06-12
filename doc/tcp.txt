@@ -1,16 +1,16 @@
 |-->tcp_check_req //(tcp_minisocks.c)
 	|-->.syn_recv_sock //(tcp_ipv4.c)
-		|-->tcp_v4_syn_recv_sock //(tcp_ipv4.c) syn½ÓÊÕ´¦Àí
-			|-->sk_acceptq_is_full //(tcp_ipv4.c) ¼ì²éacceptµÄ¶ÓÁĞ
+		|-->tcp_v4_syn_recv_sock //(tcp_ipv4.c) synæ¥æ”¶å¤„ç†
+			|-->sk_acceptq_is_full //(tcp_ipv4.c) æ£€æŸ¥acceptçš„é˜Ÿåˆ—
 				|-->sk_max_ack_backlog //(sock.h)
 				
 
-|-->inetsw_array //(af_inet.c) ¶¨Òå´«Êä²ã£¬ÀıÈçTCP¡¢UDP
+|-->inetsw_array //(af_inet.c) å®šä¹‰ä¼ è¾“å±‚ï¼Œä¾‹å¦‚TCPã€UDP
 	|-->inet_stream_ops //(af_inet.c)
 		|-->.listen        = inet_listen //(af_inet.c)
-			|-->inet_listen //(af_inet.c) ½«socket×´Ì¬Ç¨ÒÆµ½listening×´Ì¬				
+			|-->inet_listen //(af_inet.c) å°†socketçŠ¶æ€è¿ç§»åˆ°listeningçŠ¶æ€				
 				|-->inet_csk_listen_start //(inet_connection_sock.c)
-					|-->sk->sk_max_ack_backlog = backlog //ÉèÖÃsk_max_ack_backlogµÄÊıÖµ
+					|-->sk->sk_max_ack_backlog = backlog //è®¾ç½®sk_max_ack_backlogçš„æ•°å€¼
 
 struct fd {
     struct file 	*file;
@@ -64,7 +64,7 @@ const struct proto_ops inet_stream_ops = {
     .compat_getsockopt = compat_sock_common_getsockopt,
     .compat_ioctl      = inet_compat_ioctl,
 #endif
-};//(net/ipv4/af_inet.c) tcpĞ­Òé
+};//(net/ipv4/af_inet.c) tcpåè®®
 
 const struct proto_ops inet_dgram_ops = {
     .family        = PF_INET,
@@ -91,7 +91,7 @@ const struct proto_ops inet_dgram_ops = {
     .compat_getsockopt = compat_sock_common_getsockopt,
     .compat_ioctl      = inet_compat_ioctl,
 #endif
-};//(net/ipv4/af_inet.c) UDPĞ­Òé
+};//(net/ipv4/af_inet.c) UDPåè®®
 
 static const struct proto_ops inet_sockraw_ops = {
     .family        = PF_INET,
@@ -117,7 +117,174 @@ static const struct proto_ops inet_sockraw_ops = {
     .compat_getsockopt = compat_sock_common_getsockopt,
     .compat_ioctl      = inet_compat_ioctl,
 #endif
-};//(net/ipv4/af_inet.c) rawĞ­Òé
+};//(net/ipv4/af_inet.c) rawåè®®
+
+struct tcphdr {
+    __be16  source;
+    __be16  dest;
+    __be32  seq;
+    __be32  ack_seq;
+#if defined(__LITTLE_ENDIAN_BITFIELD) //å°ç«¯æ•°æ®å­˜å‚¨ç»“æ„
+    __u16   res1:4,
+        doff:4,
+        fin:1,
+        syn:1,
+        rst:1,
+        psh:1,
+        ack:1,
+        urg:1,
+        ece:1,
+        cwr:1;
+#elif defined(__BIG_ENDIAN_BITFIELD) //å¤§ç«¯æ•°æ®å­˜å‚¨ç»“æ„æ’åº
+    __u16   doff:4, //tcpå¤´éƒ¨ç»“æ„é•¿åº¦ï¼Œä»¥4å­—èŠ‚å¯¹é½
+        res1:4,
+        cwr:1,
+        ece:1,
+        urg:1,
+        ack:1,
+        psh:1,
+        rst:1,
+        syn:1,
+        fin:1;
+#else
+#error  "Adjust your <asm/byteorder.h> defines"
+#endif
+    __be16  window;
+    __sum16 check;
+    __be16  urg_ptr;
+}; //(include/uapi/linux/tcp.h) tcpæ•°æ®ç»“æ„å¤´
+
+|-->tcp_ipv4 åè®®æ—çš„é»˜è®¤å®šä¹‰
+i	|-->struct proto tcp_prot = {
+    	.name           = "TCP",
+    	.owner          = THIS_MODULE,
+    	.close          = tcp_close,
+    	.connect        = tcp_v4_connect,
+    	.disconnect     = tcp_disconnect,
+    	.accept         = inet_csk_accept,
+    	.ioctl          = tcp_ioctl,
+    	.init           = tcp_v4_init_sock,
+    	.destroy        = tcp_v4_destroy_sock,
+    	.shutdown       = tcp_shutdown,
+    	.setsockopt     = tcp_setsockopt,
+    	.getsockopt     = tcp_getsockopt,
+    	.keepalive      = tcp_set_keepalive,
+    	.recvmsg        = tcp_recvmsg,
+    	.sendmsg        = tcp_sendmsg,
+    	.sendpage       = tcp_sendpage,
+    	.backlog_rcv        = tcp_v4_do_rcv,
+    	.release_cb     = tcp_release_cb,
+    	.hash           = inet_hash,
+    	.unhash         = inet_unhash,
+    	.get_port       = inet_csk_get_port,
+    	.enter_memory_pressure  = tcp_enter_memory_pressure,
+    	.leave_memory_pressure  = tcp_leave_memory_pressure,
+    	.stream_memory_free = tcp_stream_memory_free,
+    	.sockets_allocated  = &tcp_sockets_allocated,
+    	.orphan_count       = &tcp_orphan_count,
+    	.memory_allocated   = &tcp_memory_allocated,
+    	.memory_pressure    = &tcp_memory_pressure,
+    	.sysctl_mem     = sysctl_tcp_mem,
+    	.sysctl_wmem        = sysctl_tcp_wmem,
+    	.sysctl_rmem        = sysctl_tcp_rmem,
+    	.max_header     = MAX_TCP_HEADER,
+    	.obj_size       = sizeof(struct tcp_sock),
+		.slab_flags     = SLAB_TYPESAFE_BY_RCU,
+    	.twsk_prot      = &tcp_timewait_sock_ops,
+    	.rsk_prot       = &tcp_request_sock_ops,
+    	.h.hashinfo     = &tcp_hashinfo,
+    	.no_autobind        = true,
+#ifdef CONFIG_COMPAT
+    	.compat_setsockopt  = compat_tcp_setsockopt,
+    	.compat_getsockopt  = compat_tcp_getsockopt,
+#endif
+    	.diag_destroy       = tcp_abort,
+};//(net/ipv4/tcp_ipv4.c)
+
+
+|-->tcpçš„çŠ¶æ€å€¼
+	enum {
+	    TCP_ESTABLISHED = 1,
+	    TCP_SYN_SENT,
+	    TCP_SYN_RECV,
+	    TCP_FIN_WAIT1,
+	    TCP_FIN_WAIT2,
+	    TCP_TIME_WAIT,
+	    TCP_CLOSE,
+	    TCP_CLOSE_WAIT,
+	    TCP_LAST_ACK,
+	    TCP_LISTEN,
+	    TCP_CLOSING,    /* Now a valid state */
+	    TCP_NEW_SYN_RECV,
+	
+	    TCP_MAX_STATES  /* Leave at the end! */
+	}; //(tcp_states.h)
+
+|-->tcp_ipv4 æ–¹æ³•//(net/ipv4/tcp_ipv4.c)
+	|-->const struct inet_connection_sock_af_ops ipv4_specific = {
+    	.queue_xmit    = ip_queue_xmit,
+    	.send_check    = tcp_v4_send_check,
+    	.rebuild_header    = inet_sk_rebuild_header,
+    	.sk_rx_dst_set     = inet_sk_rx_dst_set,
+    	.conn_request      = tcp_v4_conn_request,
+    	.syn_recv_sock     = tcp_v4_syn_recv_sock,
+    	.net_header_len    = sizeof(struct iphdr),
+    	.setsockopt    = ip_setsockopt,
+    	.getsockopt    = ip_getsockopt,
+    	.addr2sockaddr     = inet_csk_addr2sockaddr,
+    	.sockaddr_len      = sizeof(struct sockaddr_in),
+#ifdef CONFIG_COMPAT
+    	.compat_setsockopt = compat_ip_setsockopt,
+    	.compat_getsockopt = compat_ip_getsockopt,
+#endif
+    	.mtu_reduced       = tcp_v4_mtu_reduced,
+	};
+
+|-->tcp_v4_rcv //(tcp_ipv4.c) æ•°æ®åŒ…è¿›å…¥tcpçš„æ•°æ®å…¥å£
+	|-->pskb_may_pull //(skbuff.h) å¯¹æ•°æ®åŒ…çš„å¤´åšä¸€ä¸ªæ ¡éªŒï¼Œç”¨tcpå¤´çš„å¤§å°ä¸ºåŸºå‡†è¿›è¡Œåˆ¤æ–­
+	|-->skb_checksum_init //(skbuff.h) tcpæ•°æ®æ ¡éªŒ
+
+
+|-->connect // åº”ç”¨å±‚
+	|-->SYSCALL_DEFINE3(connect, int, fd, struct sockaddr __user *, uservaddr, int, addrlen)//(net/socket.c)
+		|-->sock->ops->connect //(socket.c)
+			|-->inet_stream_connect //(af_inet.c)
+				|-->__inet_stream_connect(sock, uaddr, addr_len, flags, 0) //(af_inet.c)
+					|-->switch(sock->state)
+						|-->case SS_UNCONNECTED //åˆå§‹çŠ¶æ€ä¸ºè¯¥çŠ¶æ€
+							|-->sk->sk_prot->connect //(af_inet.c)
+								|-->tcp_v4_connect //(tcp_ipv4.c)
+									|-->ip_route_connect //()
+									|-->sk_rcv_saddr_set //()
+									|-->sk_daddr_set //()
+									|-->tcp_set_state(sk, TCP_SYN_SENT) //(net/ipv4/tcp.c) è®¾ç½®skçš„çŠ¶æ€ä¸ºTCP_SYN_SENT
+									|-->inet_hash_connect //()
+									|-->sk_set_txhash //()
+									|-->ip_route_newports //()
+									|-->tcp_connect //(tcp_output.c) Build a SYN and send it off 
+										|-->tcp_connect_init //(tcp_output.c)
+											|-->
+
+										|-->tcp_init_nondata_skb //()
+										|-->tcp_mstamp_refresh //()
+										|-->tp->retrans_stamp = tcp_time_stamp(tp) //
+										|-->tcp_connect_queue_skb //(tcp_output.c)
+
+										|-->tcp_ecn_send_syn //(tcp_output.c)
+											|-->
+
+										|-->tp->fastopen_req ? tcp_send_syn_data(sk, buff) :
+       											tcp_transmit_skb(sk, buff, 1, sk->sk_allocation)//(tcp_output.c)
+											|-->case tcp_send_syn_data //(tcp_output.c)
+												|-->tcp_transmit_skb //(tcp_output.c)
+
+											|-->case tcp_transmit_skb //(tcp_output.c)
+												|-->icsk->icsk_af_ops->queue_xmit //(tcp_output.c)
+													|-->ip_queue_xmit //()
+							
+							|-->sock->state = SS_CONNECTING //(af_inet.c)
+							|-->sock_sndtimeo //()
+							|-->
 
 
 |-->fdget //(include/linux/file.h)
@@ -131,52 +298,52 @@ static const struct proto_ops inet_sockraw_ops = {
 			
 		|-->return (struct fd){(struct file *)(v & ~3),v & 3}
 		
-|-->socket //Ó¦ÓÃ²ã
-	|-->SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol) //(net/socket.c) kernel²ã
+|-->socket //åº”ç”¨å±‚
+	|-->SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol) //(net/socket.c) kernelå±‚
 		|-->sock_create //(socket.c)
 			|-->__sock_create //(socket.c)
-				|-->pf->create //(socket.c) ¸ù¾İ´«ÈëµÄĞ­ÒéÀàËÆÑ¡ÔñÏàÓ¦µÄcreate»Øµ÷º¯Êı
-					|-->inet_create //(net/ipv4/af_inet.c) AF_INETĞ­Òé
+				|-->pf->create //(socket.c) æ ¹æ®ä¼ å…¥çš„åè®®ç±»ä¼¼é€‰æ‹©ç›¸åº”çš„createå›è°ƒå‡½æ•°
+					|-->inet_create //(net/ipv4/af_inet.c) AF_INETåè®®
+						|-->sock->state = SS_UNCONNECTED; //(af_inet.c) è®¾ç½®å…¶åˆå§‹çŠ¶æ€
 						|-->sock_init_data //(af_inet.c)
 						|-->sk->sk_prot->init //(af_inet.c)
-							|-->tcp_v4_init_sock //(tcp_ipv4.c) tcpµÄinit»Øµ÷º¯Êı
+							|-->tcp_v4_init_sock //(tcp_ipv4.c) tcpçš„initå›è°ƒå‡½æ•°
 								|-->inet_csk //()
 								|-->tcp_init_sock //(net/ipv4/tcp.c)
-									|-->sk->sk_state = TCP_CLOSE //(³õÊ¼×´Ì¬)
-									|-->sk->sk_sndbuf = sysctl_tcp_wmem[1] //(Ä¬ÈÏ·¢ËÍbuff)
-									|-->sk->sk_rcvbuf = sysctl_tcp_rmem[1] //(Ä¬ÈÏ¶ÁÈ¡buff)
+									|-->sk->sk_state = TCP_CLOSE //(åˆå§‹çŠ¶æ€)
+									|-->sk->sk_sndbuf = sysctl_tcp_wmem[1] //(é»˜è®¤å‘é€buff)
+									|-->sk->sk_rcvbuf = sysctl_tcp_rmem[1] //(é»˜è®¤è¯»å–buff)
 								
-								|-->icsk->icsk_af_ops = &ipv4_specific //()
-								|-->
+								|-->icsk->icsk_af_ops = &ipv4_specific //(tcp_ipv4.c) ä¸ºtcp_ipv4ç»‘å®šé»˜è®¤çš„æ–¹æ³•
 						 
 						|-->BPF_CGROUP_RUN_PROG_INET_SOCK //(af_inet.c)
 		
-		|-->sock_map_fd //(socket.c) ×îÖÕ·µ»ØµÄfdÎÄ¼şÃèÊö·û
-			|-->get_unused_fd_flags //(file.c) »ñÈ¡Ò»¸öÎ´Ê¹ÓÃµÄfd£¬×îÖÕ·µ»ØµÄÒ²ÊÇ¸ÃÖµ
+		|-->sock_map_fd //(socket.c) æœ€ç»ˆè¿”å›çš„fdæ–‡ä»¶æè¿°ç¬¦
+			|-->get_unused_fd_flags //(file.c) è·å–ä¸€ä¸ªæœªä½¿ç”¨çš„fdï¼Œæœ€ç»ˆè¿”å›çš„ä¹Ÿæ˜¯è¯¥å€¼
 				|-->__alloc_fd //(file.c)
-					|-->files_fdtable //(fdtable.h) »ñÈ¡ÎÄ¼şÃèÊö·û
-					|-->find_next_fd //(file.c) ²éÕÒÏÂÒ»¸öID
-					|-->expand_files //() ÍØÕ¹ÎÄ¼ş±í£¬ÓÃÓÚÔÚfdÒÑ¾­³¬¹ıfd_maxÊ±Ê¹ÓÃ
-					|-->__set_open_fd //(file.c)  ½«·ÖÅäµ½µÄfd·ÅÈëopenÁ´±íÖĞ
+					|-->files_fdtable //(fdtable.h) è·å–æ–‡ä»¶æè¿°ç¬¦
+					|-->find_next_fd //(file.c) æŸ¥æ‰¾ä¸‹ä¸€ä¸ªID
+					|-->expand_files //() æ‹“å±•æ–‡ä»¶è¡¨ï¼Œç”¨äºåœ¨fdå·²ç»è¶…è¿‡fd_maxæ—¶ä½¿ç”¨
+					|-->__set_open_fd //(file.c)  å°†åˆ†é…åˆ°çš„fdæ”¾å…¥opené“¾è¡¨ä¸­
 			
 			|-->sock_alloc_file //()
 			|-->IS_ERR(newfile) //()
 			|-->fd_install(fd, newfile) //(file.c)
 				|-->__fd_install //(file.c)
-					|-->rcu_assign_pointer(fdt->fd[fd], file) //(rcupdate.h) ½«fdÓëÎÄ¼ş¹ØÁªÆğÀ´, ¸Ãº¯ÊıÓëÏÂÃæµÄfdget¶ÔÓ¦ÆğÀ´
+					|-->rcu_assign_pointer(fdt->fd[fd], file) //(rcupdate.h) å°†fdä¸æ–‡ä»¶å…³è”èµ·æ¥, è¯¥å‡½æ•°ä¸ä¸‹é¢çš„fdgetå¯¹åº”èµ·æ¥
 			
 			|-->return fd //()
 			
 
-|-->listen //Ó¦ÓÃ²ã
-	|-->SYSCALL_DEFINE2(listen, int, fd, int, backlog) //(net/socket.c) kernel²ã
+|-->listen //åº”ç”¨å±‚
+	|-->SYSCALL_DEFINE2(listen, int, fd, int, backlog) //(net/socket.c) kernelå±‚
 		|-->sock = sockfd_lookup_light //(socket.c)
 			|-->fdget //(include/linux/file.h)
 				|-->__to_fd(__fdget(fd)) //(file.h)
 					|-->__fdget //(file.c)
 						|-->__fget_light(fd, FMODE_PATH) //(file.c)
-							|-->if Ö»ÓĞÒ»¸öÓµÓĞÕß
-								|-->__fcheck_files(files, fd) //(fdtable.h) ·µ»ØfileÖ¸Õë
+							|-->if åªæœ‰ä¸€ä¸ªæ‹¥æœ‰è€…
+								|-->__fcheck_files(files, fd) //(fdtable.h) è¿”å›fileæŒ‡é’ˆ
 									|-->rcu_dereference_raw(fdt->fd[fd]) //(fdtable.h)
 										|-->current->fdt->fd[fd]
 							
@@ -185,9 +352,9 @@ static const struct proto_ops inet_sockraw_ops = {
 									|-->fcheck_files //(fdtable.h)
 										|-->__fcheck_files //(fdtable.h)
 					
-					|-->return (struct fd){(struct file *)(v & ~3),v & 3}; //·µ»Ø½á¹¹Ìå
+					|-->return (struct fd){(struct file *)(v & ~3),v & 3}; //è¿”å›ç»“æ„ä½“
 				
-			|-->sock_from_file //(socket.c) ¸ù¾İÎÄ¼ş»ñÈ¡sockµØÖ·
+			|-->sock_from_file //(socket.c) æ ¹æ®æ–‡ä»¶è·å–sockåœ°å€
 				|-->return file->private_data //(socket.c)
 			
 		|-->if(sock)
@@ -197,8 +364,17 @@ static const struct proto_ops inet_sockraw_ops = {
 			
 			|-->security_socket_listen //()
 			|-->sock->ops->listen //(socket.c)
-				|-->inet_listen //(af_inet.c) tcpĞ­ÒéÖĞµÄ¼àÌı
-					|-->
+				|-->inet_listen //(af_inet.c) tcpåè®®ä¸­çš„ç›‘å¬
+					|-->inet_csk_listen_start //(inet_connection_sock.c)
+						|-->sk->sk_max_ack_backlog = backlog //(inet_connection_sock.c)
+						|-->sk->sk_ack_backlog = 0 //(inet_connection_sock.c)
+						|-->sk_state_store(sk, TCP_LISTEN) //(inet_connection_sock.c) å°†çŠ¶æ€è®¾ç½®æˆ‘å“¦TCP_LISTEN
+						|-->inet_csk_delack_init //()
+						|-->sk->sk_prot->get_port //(inet_csk_get_port.c)
+							|-->inet_csk_get_port //(inet_connection_sock.c)
+								|-->
+
+						|-->sk_dst_reset //()
+						|-->sk->sk_prot->hash //()
+
 					|-->sk->sk_max_ack_backlog = backlog; //
-
-
