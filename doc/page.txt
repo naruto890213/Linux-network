@@ -1,4 +1,5 @@
-|-->交换高速缓???	|-->lookup_swap_cache //(swap_state.c) 
+|-->交换高速缓存	
+	|-->lookup_swap_cache //(swap_state.c) 
 		|-->
 
 	|-->add_to_swap_cache //(swap_state.c) 把页插入交换高速缓存中 见下面的流程分析
@@ -10,7 +11,8 @@
 
 	|-->
 
-|-->换入???	|-->do_swap_page //(memory.c)
+|-->换入页
+	|-->do_swap_page //(memory.c)
 		|-->pte_unmap_same //()
 		|-->pte_to_swp_entry //()
 		|-->lookup_swap_cache //()
@@ -26,8 +28,8 @@
 		|-->update_mmu_cache //()
 
 
-|-->do_anonymous_page //(memory.c) 加载匿名???
-|-->mark_page_accessed //(swap.c) 处理页标记，将其标记为访问过的页???
+|-->do_anonymous_page //(memory.c) 加载匿名页
+|-->mark_page_accessed //(swap.c) 处理页标记，将其标记为访问过的页面
 |-->try_to_unuse //(swapfile.c)
 	|-->start_mm = &init_mm; //(init-mm.c)
 	|-->mmget //(mm.h)
@@ -43,7 +45,8 @@
 
 
 |-->SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags) //(swapfile.c) 对创建交换区时放入第一个页槽中的swap_header联合体字段进行检???	|-->alloc_swap_info //(swapfile.c) 分配一个内存，并进行初始化
-	|-->INIT_WORK(&p->discard_work, swap_discard_work) //(swapfile.c) 将discard_work进行赋???	|-->file_open_name //(open.c)
+	|-->INIT_WORK(&p->discard_work, swap_discard_work) //(swapfile.c) 将discard_work进行赋值	
+		|-->file_open_name //(open.c)
 	|-->claim_swapfile //(swapfile.c)
 	|-->read_mapping_page //()
 	|-->read_swap_header //(swapfile.c)
@@ -122,7 +125,8 @@ struct delayed_work {
 |-->page_referenced //(rmap.c)
 	|-->.rmap_one = page_referenced_one //(rmap.c)
 	|-->rwc.invalid_vma = invalid_page_referenced_vma //(rmap.c)
-	|-->rmap_walk //(rmap.c) 3个分支，分别是内核、匿名映射、文件映???		|-->rmap_walk_ksm //()
+	|-->rmap_walk //(rmap.c) 3个分支，分别是内核、匿名映射、文件映射
+		|-->rmap_walk_ksm //()
 		|-->rmap_walk_anon //(rmap.c)
 		|-->rmap_walk_file //(rmap.c)
 			|-->rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg) //()
@@ -150,8 +154,8 @@ struct zone {
 	unsigned long watermark[NR_WMARK]; //内存水位WMARK_MIN、WMARK_LOW、WMARK_HIGH
 	long lowmem_reserve[MAX_NR_ZONES] //每个管理区必须保留的页框??
 	struct pglist_data  *zone_pgdat; //zone的主要数据结构，内部包含lru链表和具体的数据
-	unsigned long       spanned_pages; //管理区的大小,包括??
-	unsigned long       present_pages; //管理区的大小，不包括??
+	unsigned long       spanned_pages; //管理区的大小,包括洞
+	unsigned long       present_pages; //管理区的大小，不包括洞
 	.......
 };
 
@@ -180,23 +184,23 @@ struct lruvec {
 union swap_header {
 	struct {
         char reserved[PAGE_SIZE - 10];
-        char magic[10];         /* SWAP-SPACE or SWAPSPACE2  用于标记分区或文件为交换???/
+        char magic[10];         /* SWAP-SPACE or SWAPSPACE2  用于标记分区或文件为交换区/
     } magic;
     struct {
         char        bootbits[1024]; /* Space for disklabel etc. 包含分区数据、磁盘标签等*/
         __u32       version; //交换算法的版??
         __u32       last_page; //可有效使用的最后一个槽
-        __u32       nr_badpages; //有缺陷的页槽的个??
+        __u32       nr_badpages; //有缺陷的页槽的个数
         unsigned char   sws_uuid[16];
         unsigned char   sws_volume[16];
-        __u32       padding[117]; //用于填充的字??
-        __u32       badpages[1]; //用来指定有缺陷的页槽的位??
+        __u32       padding[117]; //用于填充的字数
+        __u32       badpages[1]; //用来指定有缺陷的页槽的位置
     } info;
 };
 
 
 
-|-->mmap_mem //(drivers/char/mem.c) mmap的实??
+|-->mmap_mem //(drivers/char/mem.c) mmap的实现
 	|-->remap_pfn_range //(memory.c)
 		|-->pgd_addr_end //(memory.c)
 		|-->remap_p4d_range //(memory.c)
@@ -231,7 +235,7 @@ union swap_header {
 														|-->node_dirty_ok //(page-writeback.c) 查看是否dirty的数量是否已经到limit
 														|-->zone_watermark_fast //(page_alloc.c)
 															|-->__zone_watermark_ok //(page_alloc.c)
-																|-->list_empty(&area->free_list) //(page_alloc.c) 检查free_list链表是否还有节点 用于快速分???														
+																|-->list_empty(&area->free_list) //(page_alloc.c) 检查free_list链表是否还有节点 用于快速分配														
 														|-->zone_allows_reclaim //()
 														|-->node_reclaim //()
 														|-->zone_watermark_ok //()
@@ -255,11 +259,11 @@ union swap_header {
 																			|-->zone_page_state_add //(vmstat.h)
 																	
 																	if(cold)
-																		|-->list_last_entry //(list.h) 获取lru链表的尾部元??
+																		|-->list_last_entry //(list.h) 获取lru链表的尾部元素
 																	else
-																		|-->list_first_entry //(list.h) 插入lru链表的头部元??
+																		|-->list_first_entry //(list.h) 插入lru链表的头部元素
 																		
-																	|-->list_del(&page->lru) //将page从lru链表中删??
+																	|-->list_del(&page->lru) //将page从lru链表中删除
 																	|-->check_new_pcp //(page_alloc.c)
 																		|-->return false //(page_alloc.c)
 																
@@ -293,11 +297,11 @@ union swap_header {
 	|-->.rmap_one = try_to_unmap_one //(rmap.c)
 	|-->.done = page_mapcount_is_zero //(rmap.c)
 	|-->rmap_walk_locked //()
-		|-->PageAnon //(page-flags.h) 读取mapping的最低位，最低位???表示该页为匿名页，否则为映射??
-		|-->rmap_walk_anon //(rmap.c) 匿名页处理函??
+		|-->PageAnon //(page-flags.h) 读取mapping的最低位，最低位为1表示该页为匿名页，否则为映射页
+		|-->rmap_walk_anon //(rmap.c) 匿名页处理函数
 			|-->
 
-		|-->rmap_walk_file //(rmap.c) 映射页处理函??
+		|-->rmap_walk_file //(rmap.c) 映射页处理函数
 			|-->page_mapping //()
 			|-->page_to_pgoff //()
 			|-->vma_interval_tree_foreach //(mm.h)
