@@ -11,3 +11,194 @@
 			|-->inet_listen //(af_inet.c) 将socket状态迁移到listening状态				
 				|-->inet_csk_listen_start //(inet_connection_sock.c)
 					|-->sk->sk_max_ack_backlog = backlog //设置sk_max_ack_backlog的数值
+
+struct fd {
+    struct file 	*file;
+    unsigned int 	flags;
+};		
+
+struct fdtable { //(include/linux/fdtable.h)
+    unsigned int max_fds;
+    struct file __rcu **fd;      /* current fd array */
+    unsigned long *close_on_exec;
+    unsigned long *open_fds;
+    unsigned long *full_fds_bits;
+    struct rcu_head rcu;
+};
+
+#define FMODE_PATH      ((__force fmode_t)0x4000)
+
+static const struct net_proto_family inet_family_ops = {
+    .family = PF_INET,
+    .create = inet_create,
+    .owner  = THIS_MODULE,
+};//(net/ipv4/af_inet.c)
+
+
+const struct proto_ops inet_stream_ops = {
+    .family        = PF_INET,
+    .owner         = THIS_MODULE,
+    .release       = inet_release,
+    .bind          = inet_bind,
+    .connect       = inet_stream_connect,
+    .socketpair    = sock_no_socketpair,
+    .accept        = inet_accept,
+    .getname       = inet_getname,
+    .poll          = tcp_poll,
+    .ioctl         = inet_ioctl,
+    .listen        = inet_listen,
+    .shutdown      = inet_shutdown,
+    .setsockopt    = sock_common_setsockopt,
+    .getsockopt    = sock_common_getsockopt,
+    .sendmsg       = inet_sendmsg,
+    .recvmsg       = inet_recvmsg,
+    .mmap          = sock_no_mmap,
+    .sendpage      = inet_sendpage,
+    .splice_read       = tcp_splice_read,
+    .read_sock     = tcp_read_sock,
+    .sendmsg_locked    = tcp_sendmsg_locked,
+    .sendpage_locked   = tcp_sendpage_locked,
+    .peek_len      = tcp_peek_len,
+#ifdef CONFIG_COMPAT
+    .compat_setsockopt = compat_sock_common_setsockopt,
+    .compat_getsockopt = compat_sock_common_getsockopt,
+    .compat_ioctl      = inet_compat_ioctl,
+#endif
+};//(net/ipv4/af_inet.c) tcp协议
+
+const struct proto_ops inet_dgram_ops = {
+    .family        = PF_INET,
+    .owner         = THIS_MODULE,
+    .release       = inet_release,
+    .bind          = inet_bind,
+    .connect       = inet_dgram_connect,
+    .socketpair    = sock_no_socketpair,
+    .accept        = sock_no_accept,
+    .getname       = inet_getname,
+    .poll          = udp_poll,
+    .ioctl         = inet_ioctl,
+    .listen        = sock_no_listen,
+    .shutdown      = inet_shutdown,
+    .setsockopt    = sock_common_setsockopt,
+    .getsockopt    = sock_common_getsockopt,
+    .sendmsg       = inet_sendmsg,
+    .recvmsg       = inet_recvmsg,
+    .mmap          = sock_no_mmap,
+    .sendpage      = inet_sendpage,
+    .set_peek_off      = sk_set_peek_off,
+#ifdef CONFIG_COMPAT
+    .compat_setsockopt = compat_sock_common_setsockopt,
+    .compat_getsockopt = compat_sock_common_getsockopt,
+    .compat_ioctl      = inet_compat_ioctl,
+#endif
+};//(net/ipv4/af_inet.c) UDP协议
+
+static const struct proto_ops inet_sockraw_ops = {
+    .family        = PF_INET,
+    .owner         = THIS_MODULE,
+    .release       = inet_release,
+    .bind          = inet_bind,
+    .connect       = inet_dgram_connect,
+    .socketpair    = sock_no_socketpair,
+    .accept        = sock_no_accept,
+    .getname       = inet_getname,
+    .poll          = datagram_poll,
+    .ioctl         = inet_ioctl,
+    .listen        = sock_no_listen,
+    .shutdown      = inet_shutdown,
+    .setsockopt    = sock_common_setsockopt,
+    .getsockopt    = sock_common_getsockopt,
+    .sendmsg       = inet_sendmsg,
+    .recvmsg       = inet_recvmsg,
+    .mmap          = sock_no_mmap,
+    .sendpage      = inet_sendpage,
+#ifdef CONFIG_COMPAT
+    .compat_setsockopt = compat_sock_common_setsockopt,
+    .compat_getsockopt = compat_sock_common_getsockopt,
+    .compat_ioctl      = inet_compat_ioctl,
+#endif
+};//(net/ipv4/af_inet.c) raw协议
+
+
+|-->fdget //(include/linux/file.h)
+	|-->__to_fd(__fdget(fd)) //(file.h)
+		|-->__fdget //(file.c)
+			|-->__fget_light(fd, FMODE_PATH) //(file.c)
+				|-->__fget(fd, mask) //(file.c)
+					|-->fcheck_files //(fdtable.h)
+						|-->__fcheck_files //(fdtable.h)
+							|-->
+			
+		|-->return (struct fd){(struct file *)(v & ~3),v & 3}
+		
+|-->socket //应用层
+	|-->SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol) //(net/socket.c) kernel层
+		|-->sock_create //(socket.c)
+			|-->__sock_create //(socket.c)
+				|-->pf->create //(socket.c) 根据传入的协议类似选择相应的create回调函数
+					|-->inet_create //(net/ipv4/af_inet.c) AF_INET协议
+						|-->sock_init_data //(af_inet.c)
+						|-->sk->sk_prot->init //(af_inet.c)
+							|-->tcp_v4_init_sock //(tcp_ipv4.c) tcp的init回调函数
+								|-->inet_csk //()
+								|-->tcp_init_sock //(net/ipv4/tcp.c)
+									|-->sk->sk_state = TCP_CLOSE //(初始状态)
+									|-->sk->sk_sndbuf = sysctl_tcp_wmem[1] //(默认发送buff)
+									|-->sk->sk_rcvbuf = sysctl_tcp_rmem[1] //(默认读取buff)
+								
+								|-->icsk->icsk_af_ops = &ipv4_specific //()
+								|-->
+						 
+						|-->BPF_CGROUP_RUN_PROG_INET_SOCK //(af_inet.c)
+		
+		|-->sock_map_fd //(socket.c) 最终返回的fd文件描述符
+			|-->get_unused_fd_flags //(file.c) 获取一个未使用的fd，最终返回的也是该值
+				|-->__alloc_fd //(file.c)
+					|-->files_fdtable //(fdtable.h) 获取文件描述符
+					|-->find_next_fd //(file.c) 查找下一个ID
+					|-->expand_files //() 拓展文件表，用于在fd已经超过fd_max时使用
+					|-->__set_open_fd //(file.c)  将分配到的fd放入open链表中
+			
+			|-->sock_alloc_file //()
+			|-->IS_ERR(newfile) //()
+			|-->fd_install(fd, newfile) //(file.c)
+				|-->__fd_install //(file.c)
+					|-->rcu_assign_pointer(fdt->fd[fd], file) //(rcupdate.h) 将fd与文件关联起来, 该函数与下面的fdget对应起来
+			
+			|-->return fd //()
+			
+
+|-->listen //应用层
+	|-->SYSCALL_DEFINE2(listen, int, fd, int, backlog) //(net/socket.c) kernel层
+		|-->sock = sockfd_lookup_light //(socket.c)
+			|-->fdget //(include/linux/file.h)
+				|-->__to_fd(__fdget(fd)) //(file.h)
+					|-->__fdget //(file.c)
+						|-->__fget_light(fd, FMODE_PATH) //(file.c)
+							|-->if 只有一个拥有者
+								|-->__fcheck_files(files, fd) //(fdtable.h) 返回file指针
+									|-->rcu_dereference_raw(fdt->fd[fd]) //(fdtable.h)
+										|-->current->fdt->fd[fd]
+							
+							|-->else
+								|-->__fget(fd, mask) //(file.c)
+									|-->fcheck_files //(fdtable.h)
+										|-->__fcheck_files //(fdtable.h)
+					
+					|-->return (struct fd){(struct file *)(v & ~3),v & 3}; //返回结构体
+				
+			|-->sock_from_file //(socket.c) 根据文件获取sock地址
+				|-->return file->private_data //(socket.c)
+			
+		|-->if(sock)
+			|-->sock_net //(sock.h)
+				|-->read_pnet //(net_namespace.h)
+					|-->return &init_net;
+			
+			|-->security_socket_listen //()
+			|-->sock->ops->listen //(socket.c)
+				|-->inet_listen //(af_inet.c) tcp协议中的监听
+					|-->
+					|-->sk->sk_max_ack_backlog = backlog; //
+
+
