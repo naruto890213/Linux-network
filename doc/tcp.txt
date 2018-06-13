@@ -239,10 +239,71 @@ i	|-->struct proto tcp_prot = {
 #endif
     	.mtu_reduced       = tcp_v4_mtu_reduced,
 	};
+	
+|-->tcp_request_sock_ipv4_ops //(net/ipv4/tcp_ipv4.c) tcp_ipv4的方法指针
+	|-->static const struct tcp_request_sock_ops tcp_request_sock_ipv4_ops = {
+		.mss_clamp  =   TCP_MSS_DEFAULT,
+#ifdef CONFIG_TCP_MD5SIG
+		.req_md5_lookup =   tcp_v4_md5_lookup,
+		.calc_md5_hash  =   tcp_v4_md5_hash_skb,
+#endif
+		.init_req   =   tcp_v4_init_req,
+#ifdef CONFIG_SYN_COOKIES
+		.cookie_init_seq =  cookie_v4_init_sequence,
+#endif
+		.route_req  =   tcp_v4_route_req,
+		.init_seq   =   tcp_v4_init_seq,
+		.init_ts_off    =   tcp_v4_init_ts_off,
+		.send_synack    =   tcp_v4_send_synack,
+	};
 
+|-->inet_csk_reqsk_queue_add //(inet_connection_sock.c)
+	|-->sk_acceptq_added //(sock.h)
+	
 |-->tcp_v4_rcv //(tcp_ipv4.c) 数据包进入tcp的数据入口
 	|-->pskb_may_pull //(skbuff.h) 对数据包的头做一个校验，用tcp头的大小为基准进行判断
 	|-->skb_checksum_init //(skbuff.h) tcp数据校验
+	
+	|-->if (sk->sk_state == TCP_LISTEN)
+		|-->ret = tcp_v4_do_rcv(sk, skb) //(tcp_ipv4.c)
+			|-->tcp_checksum_complete //()
+			|-->if (sk->sk_state == TCP_LISTEN)
+				|-->tcp_v4_cookie_check //
+				
+			|-->tcp_rcv_state_process //(tcp_input.c)
+				|-->switch (sk->sk_state)
+					|-->case TCP_LISTEN
+						|-->if (th->syn) //接收connect的第一个数据包
+							|-->icsk->icsk_af_ops->conn_request(sk, skb) //(tcp_input.c)
+								|-->tcp_v4_conn_request //(tcp_ipv4.c)
+									|-->tcp_conn_request(&tcp_request_sock_ops, &tcp_request_sock_ipv4_ops, sk, skb) //(tcp_input.c)
+										|-->if (sk_acceptq_is_full(sk)) //(tcp_input.c)
+												|-->return sk->sk_ack_backlog > sk->sk_max_ack_backlog //(sock.h) 判断ack队列值是否已经超过最大值，该值由listen的第二个参数设置
+												
+											|-->goto drop //
+										
+										|-->inet_reqsk_alloc //()
+										|-->tcp_parse_options //(tcp_input.c)
+										|-->tcp_openreq_init //(tcp_input.c)
+										|-->af_ops->init_req(req, sk, skb) //(tcp_input.c)
+											|-->tcp_v4_init_req //(tcp_ipv4.c)
+												|-->
+										
+										|-->af_ops->route_req(sk, &fl, req) //()
+										|-->tcp_ecn_create_request //()
+										|-->tcp_openreq_init_rwin //()
+										|-->af_ops->send_synack //(tcp_input.c)
+											|-->tcp_v4_send_synack //(tcp_ipv4.c)
+												|-->inet_csk_route_req //()
+												|-->tcp_make_synack //(tcp_output.c) 准备SYN-ACK数据包
+													|-->th->syn = 1 //(tcp_output.c)
+													|-->th->ack = 1 //(tcp_output.c)
+												
+												|-->__tcp_v4_send_check //()
+												|-->ip_build_and_send_pkt //()
+												|-->net_xmit_eval //()
+		
+		|-->return ret //(tcp_ipv4.c)
 
 
 |-->connect // 应用层
@@ -265,38 +326,34 @@ i	|-->struct proto tcp_prot = {
 										|-->tcp_connect_init //(tcp_output.c)
 											|-->
 
-										|-->tcp_init_nondata_skb //()
-										|-->tcp_mstamp_refresh //()
-										|-->tp->retrans_stamp = tcp_time_stamp(tp) //
-										|-->tcp_connect_queue_skb //(tcp_output.c)
-
-										|-->tcp_ecn_send_syn //(tcp_output.c)
-											|-->
-
-										|-->tp->fastopen_req ? tcp_send_syn_data(sk, buff) :
-       											tcp_transmit_skb(sk, buff, 1, sk->sk_allocation)//(tcp_output.c)
-											|-->case tcp_send_syn_data //(tcp_output.c)
-												|-->tcp_transmit_skb //(tcp_output.c)
-
+										|-->tcp_init_nondata_skb(buff, tp->write_seq++, TCPHDR_SYN) //(tcp_output.c) 设置tcp_flags为SYN，为传输构造函数做准备
+										|-->tcp_mstamp_refresh //()													
+										|-->tp->retrans_stamp = tcp_time_stamp(tp) //								
+										|-->tcp_connect_queue_skb //(tcp_output.c)									
+																													
+										|-->tcp_ecn_send_syn //(tcp_output.c)										
+											|-->																	
+																													
+										|-->tp->fastopen_req ? tcp_send_syn_data(sk, buff) :						
+       											tcp_transmit_skb(sk, buff, 1, sk->sk_allocation)//(tcp_output.c)	
+											|-->case tcp_send_syn_data //(tcp_output.c)								
+												|-->TCP_SKB_CB(syn_data)->tcp_flags = TCPHDR_ACK | TCPHDR_PSH // (tcp_output.c) (设置flags)
+												|-->tcp_transmit_skb //(tcp_output.c)								
+													|-->if (unlikely(tcb->tcp_flags & TCPHDR_SYN)) //(tcp_output.c)
+														|-->tcp_syn_options //(tcp_output.c)
+															|-->
+													
+													|-->else
+														|-->tcp_established_options //
+													
 											|-->case tcp_transmit_skb //(tcp_output.c)
+												|-->*(((__be16 *)th) + 6) = htons(((tcp_header_size >> 2) << 12) | tcb->tcp_flags) //(tcp_output.c) 为tcp头赋值，并使用tcp_flags表示flag，如果为connect，则该值为TCPHDR_SYN(0x02) 即数据包中包含SYN
 												|-->icsk->icsk_af_ops->queue_xmit //(tcp_output.c)
 													|-->ip_queue_xmit //()
 							
 							|-->sock->state = SS_CONNECTING //(af_inet.c)
 							|-->sock_sndtimeo //()
 							|-->
-
-
-|-->fdget //(include/linux/file.h)
-	|-->__to_fd(__fdget(fd)) //(file.h)
-		|-->__fdget //(file.c)
-			|-->__fget_light(fd, FMODE_PATH) //(file.c)
-				|-->__fget(fd, mask) //(file.c)
-					|-->fcheck_files //(fdtable.h)
-						|-->__fcheck_files //(fdtable.h)
-							|-->
-			
-		|-->return (struct fd){(struct file *)(v & ~3),v & 3}
 		
 |-->socket //应用层
 	|-->SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol) //(net/socket.c) kernel层
