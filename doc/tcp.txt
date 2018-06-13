@@ -268,7 +268,7 @@ i	|-->struct proto tcp_prot = {
 		|-->ret = tcp_v4_do_rcv(sk, skb) //(tcp_ipv4.c)
 			|-->tcp_checksum_complete //()
 			|-->if (sk->sk_state == TCP_LISTEN)
-				|-->tcp_v4_cookie_check //
+				|-->tcp_v4_cookie_check //(tcp_ipv4.c)
 				
 			|-->tcp_rcv_state_process //(tcp_input.c)
 				|-->switch (sk->sk_state)
@@ -282,7 +282,9 @@ i	|-->struct proto tcp_prot = {
 												
 											|-->goto drop //
 										
-										|-->inet_reqsk_alloc //()
+										|-->inet_reqsk_alloc //(tcp_input.c)
+											|-->ireq->ireq_state = TCP_NEW_SYN_RECV //(tcp_input.c) 将状态设置为TCP_NEW_SYN_RECV, 15年开始使用该状态机替换TCP_SYN_RECV, TCP_SYN_RECV用于fast
+
 										|-->tcp_parse_options //(tcp_input.c)
 										|-->tcp_openreq_init //(tcp_input.c)
 										|-->af_ops->init_req(req, sk, skb) //(tcp_input.c)
@@ -304,6 +306,54 @@ i	|-->struct proto tcp_prot = {
 												|-->net_xmit_eval //()
 		
 		|-->return ret //(tcp_ipv4.c)
+	
+	|-->sk_incoming_cpu_update //()
+	|-->tcp_segs_in //()
+	|-->sock_owned_by_user //()
+	|-->tcp_v4_do_rcv //(tcp_ipv4.c)
+		|-->sock_rps_save_rxhash //()
+		|-->tcp_rcv_state_process //(tcp_input.c)
+			|-->switch(sk->sk_state)
+				|-->case TCP_SYN_SENT //(tcp_input.c) socket接收到listen返回的ack+syn后的状态
+					|-->tcp_mstamp_refresh //()
+					|-->tcp_rcv_synsent_state_process //(tcp_input.c)
+						|-->tcp_parse_options //()
+						|-->if (th->ack) //(tcp_input.c) 接收到的数据中ack为1
+							|-->if (th->rst) 
+								|-->tcp_reset(sk) //(tcp_input.c)
+								|-->tcp_drop //
+								|-->return 0;
+							
+							|-->else
+								|-->tcp_ecn_rcv_synack //()
+								|-->tcp_init_wl //()
+								|-->tcp_ack //()
+								|-->tcp_mtup_init //()
+								|-->tcp_sync_mss //()
+								|-->tcp_initialize_rcv_mss //()
+								|-->tcp_finish_connect //(tcp_input.c)
+									|-->tcp_set_state(sk, TCP_ESTABLISHED) //(tcp_input.c) 进入ESTABLISHED状态
+									|-->icsk->icsk_af_ops->sk_rx_dst_set //(tcp_input.c)
+										|-->inet_sk_rx_dst_set //(tcp_ipv4.c)
+
+									|-->security_inet_conn_established //()
+									|-->icsk->icsk_af_ops->rebuild_header //()
+									|-->tcp_init_metrics //()
+									|-->tcp_call_bpf //()
+									|-->tcp_init_congestion_control //()
+									|-->tcp_init_buffer_space //()
+
+								|-->tcp_rcv_fastopen_synack //()
+								|-->tcp_send_ack //(tcp_output.c) 发送ask，并更新window大小
+									|-->tcp_init_nondata_skb(buff, tcp_acceptable_seq(sk), TCPHDR_ACK) //
+									|-->skb_set_tcp_pure_ack //
+									|-->tcp_transmit_skb //(tcp_output.c)
+
+
+	|-->tcp_add_backlog //(tcp_ipv4.c)
+		|-->sk_add_backlog //(sock.h)
+			|-->sk_rcvqueues_full //()
+			|-->__sk_add_backlog //()
 
 
 |-->connect // 应用层
@@ -435,3 +485,14 @@ i	|-->struct proto tcp_prot = {
 						|-->sk->sk_prot->hash //()
 
 					|-->sk->sk_max_ack_backlog = backlog; //
+
+|-->tcp_rcv_synsent_state_process //(tcp_input.c)
+	|-->if (th->syn)
+		|-->tcp_set_state(sk, TCP_SYN_RECV) //(tcp_input.c)
+
+
+|-->tcp_check_req //(tcp_minisocks.c)
+	|-->tcp_v4_syn_recv_sock //(tcp_ipv4.c)
+		|-->tcp_create_openreq_child //(net/ipv4/tcp_minisocks.c)
+			|-->inet_csk_clone_lock //(inet_connection_sock.c)
+				|-->newsk->sk_state = TCP_SYN_RECV //(inet_connection_sock.c)
