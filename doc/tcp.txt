@@ -257,6 +257,17 @@ i	|-->struct proto tcp_prot = {
 		.send_synack    =   tcp_v4_send_synack,
 	};
 
+|-->struct request_sock_ops tcp_request_sock_ops //(tcp_ipv4.c)
+	|-->struct request_sock_ops tcp_request_sock_ops __read_mostly = {
+    	.family     =   PF_INET,
+    	.obj_size   =   sizeof(struct tcp_request_sock),
+    	.rtx_syn_ack    =   tcp_rtx_synack,
+    	.send_ack   =   tcp_v4_reqsk_send_ack,
+    	.destructor =   tcp_v4_reqsk_destructor,
+    	.send_reset =   tcp_v4_send_reset,
+    	.syn_ack_timeout =  tcp_syn_ack_timeout,
+	};
+
 |-->inet_csk_reqsk_queue_add //(inet_connection_sock.c)
 	|-->sk_acceptq_added //(sock.h)
 	
@@ -286,14 +297,24 @@ i	|-->struct proto tcp_prot = {
 											|-->ireq->ireq_state = TCP_NEW_SYN_RECV //(tcp_input.c) 将状态设置为TCP_NEW_SYN_RECV, 15年开始使用该状态机替换TCP_SYN_RECV, TCP_SYN_RECV用于fast
 
 										|-->tcp_parse_options //(tcp_input.c)
-										|-->tcp_openreq_init //(tcp_input.c)
+										|-->tcp_openreq_init //(tcp_input.c) 初始化变量
 										|-->af_ops->init_req(req, sk, skb) //(tcp_input.c)
 											|-->tcp_v4_init_req //(tcp_ipv4.c)
 												|-->
 										
+										|-->af_ops->init_ts_off //(tcp_input.c)
 										|-->af_ops->route_req(sk, &fl, req) //()
 										|-->tcp_ecn_create_request //()
 										|-->tcp_openreq_init_rwin //()
+										|-->inet_csk_reqsk_queue_hash_add(sk, req, tcp_timeout_init((struct sock *)req))
+											|-->reqsk_queue_hash_req(req, timeout) //(inet_connection_sock.c)
+												|-->setup_pinned_timer(&req->rsk_timer, reqsk_timer_handler, (unsigned long)req)
+													|-->reqsk_timer_handler //(inet_connection_sock.c)
+														|-->req->rsk_ops->syn_ack_timeout //(inet_connection_sock.c)
+															|-->tcp_syn_ack_timeout //(tcp_timer.c)
+
+											|-->inet_csk_reqsk_queue_added //()
+
 										|-->af_ops->send_synack //(tcp_input.c)
 											|-->tcp_v4_send_synack //(tcp_ipv4.c)
 												|-->inet_csk_route_req //()
@@ -302,7 +323,11 @@ i	|-->struct proto tcp_prot = {
 													|-->th->ack = 1 //(tcp_output.c)
 												
 												|-->__tcp_v4_send_check //()
-												|-->ip_build_and_send_pkt //()
+												|-->ip_build_and_send_pkt //(ip_output.c)
+													|-->ip_local_out //(ip_output.c)
+														|-->__ip_local_out //()
+														|-->dst_output //() 将数据发送出去
+
 												|-->net_xmit_eval //()
 		
 		|-->return ret //(tcp_ipv4.c)
@@ -372,6 +397,20 @@ i	|-->struct proto tcp_prot = {
 									|-->inet_hash_connect //()
 									|-->sk_set_txhash //()
 									|-->ip_route_newports //()
+									|-->tp->write_seq = secure_tcp_seq(inet->inet_saddr,
+                               											inet->inet_daddr,
+                               											inet->inet_sport,
+                               											usin->sin_port) //(tcp_ipv4.c) 计算seq的初始化值,根据源端口，目的端口，源ip地址，目的ip地址进行的hash算法
+											|-->net_secret_init //()
+											|-->hash = siphash_3u32((__force u32)saddr, (__force u32)daddr,
+                								(__force u32)sport << 16 | (__force u32)dport, &net_secret) //(secure_seq.c) 将源端口左移16到高位，目的端口为低16位
+											|-->seq_scale(hash) //(secure_seq.c)
+												|-->return seq + (ktime_get_real_ns() >> 6) //(secure_seq.c) 是一个计时器，这个计时器每隔4毫秒加1, 加上之前hash的结果值等于seq的初始化值
+
+									|-->tp->tsoffset = secure_tcp_ts_off(sock_net(sk),
+                         												inet->inet_saddr,
+                         												inet->inet_daddr) //(tcp_ipv4.c)
+
 									|-->tcp_connect //(tcp_output.c) Build a SYN and send it off 
 										|-->tcp_connect_init //(tcp_output.c)
 											|-->
@@ -401,6 +440,9 @@ i	|-->struct proto tcp_prot = {
 												|-->icsk->icsk_af_ops->queue_xmit //(tcp_output.c)
 													|-->ip_queue_xmit //()
 							
+										|-->inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, inet_csk(sk)->icsk_rto, TCP_RTO_MAX)//(inet_connection_sock.h)设置timer，用于接收server的ACK_SYN返回值
+											|-->sk_reset_timer(sk, &icsk->icsk_retransmit_timer, icsk->icsk_timeout) //设置定时器，用于重传SYN数据包
+
 							|-->sock->state = SS_CONNECTING //(af_inet.c)
 							|-->sock_sndtimeo //()
 							|-->
