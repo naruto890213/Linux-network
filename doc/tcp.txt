@@ -268,14 +268,54 @@ i	|-->struct proto tcp_prot = {
     	.syn_ack_timeout =  tcp_syn_ack_timeout,
 	};
 
-|-->inet_csk_reqsk_queue_add //(inet_connection_sock.c)
+|-->cookie_v4_check //(syncookies.c)
+	|-->tcp_get_cookie_sock //(syncookies.c)
+
+|-->inet_csk_reqsk_queue_add //(inet_connection_sock.c) 增加sk_ack_backlog的值
 	|-->sk_acceptq_added //(sock.h)
+
+|-->inet_csk_listen_stop //(inet_connection_sock.c)
+	|-->reqsk_queue_remove //(request_sock.h)
+		|-->sk_acceptq_removed //(sock.h) 减少sk_ack_backlog的值
+
+|-->inet_csk_accept //(inet_connection_sock.c)
+	|-->reqsk_queue_remove //(request_sock.h)
+		|-->sk_acceptq_removed //(sock.h) 减少sk_ack_backlog的值
 	
 |-->tcp_v4_rcv //(tcp_ipv4.c) 数据包进入tcp的数据入口
 	|-->pskb_may_pull //(skbuff.h) 对数据包的头做一个校验，用tcp头的大小为基准进行判断
 	|-->skb_checksum_init //(skbuff.h) tcp数据校验
 	
-	|-->if (sk->sk_state == TCP_LISTEN)
+	|-->if (sk->sk_state == TCP_NEW_SYN_RECV) 当listen着接收到SYN数据包后发送ASK数据包，并再次接收到clinet发送的数据包
+		|-->tcp_v4_fill_cb //()
+		|-->tcp_check_req //(tcp_minisocks.c) 
+			|-->inet_csk(sk)->icsk_af_ops->syn_recv_sock //(tcp_minisocks.c)
+				|-->tcp_v4_syn_recv_sock //(tcp_ipv4.c)
+					|-->sk_acceptq_is_full //()
+					|-->tcp_create_openreq_child //(net/ipv4/tcp_minisocks.c) 创建一个新的数据包并将状态修改为TCP_SYN_RECV
+						|-->inet_csk_clone_lock //(inet_connection_sock.c)
+							|-->newsk->sk_state = TCP_SYN_RECV //(inet_connection_sock.c)
+
+			|-->inet_csk_complete_hashdance //(inet_connection_sock.c)
+				|-->inet_csk_reqsk_queue_add //(inet_connection_sock.c) 增加sk_ack_backlog的值
+					|-->sk_acceptq_added //(sock.h)
+
+		|-->tcp_child_process //(tcp_minisocks.c)
+			|-->tcp_rcv_state_process //(tcp_input.c)
+				|-->switch (sk->sk_state) 
+					|-->case TCP_SYN_RECV //在上面的步骤中将状态设置为该状态
+						|-->tcp_set_state(sk, TCP_ESTABLISHED) //(tcp_input.c)
+						|-->sk->sk_state_change(sk) //(tcp_input.c)
+							|-->sock_def_wakeup //(sock.c)
+								|-->wq = rcu_dereference(sk->sk_wq) //这里开始联系上epoll的系统调用，具体参见epoll的原理
+								|-->wake_up_interruptible_all(&wq->wait) //(wait.h)
+									|-->__wake_up //(wait.c)
+										|-->__wake_up_common_lock //(wait.c)
+											|-->__wake_up_common //(wait.c)
+												|-->curr->func //(wait.c)
+													|-->ep_poll_callback //(eventpoll.c) 
+
+	|-->if (sk->sk_state == TCP_LISTEN) listen状态进入的目录
 		|-->ret = tcp_v4_do_rcv(sk, skb) //(tcp_ipv4.c)
 			|-->tcp_checksum_complete //()
 			|-->if (sk->sk_state == TCP_LISTEN)
@@ -454,7 +494,13 @@ i	|-->struct proto tcp_prot = {
 				|-->pf->create //(socket.c) 根据传入的协议类似选择相应的create回调函数
 					|-->inet_create //(net/ipv4/af_inet.c) AF_INET协议
 						|-->sock->state = SS_UNCONNECTED; //(af_inet.c) 设置其初始状态
-						|-->sock_init_data //(af_inet.c)
+						|-->sock_init_data //(sock.c)
+							|-->sk->sk_state_change =   sock_def_wakeup;
+							|-->sk->sk_data_ready   =   sock_def_readable;
+							|-->sk->sk_write_space  =   sock_def_write_space; 
+							|-->sk->sk_error_report =   sock_def_error_report;
+							|-->sk->sk_destruct     =   sock_def_destruct;
+
 						|-->sk->sk_prot->init //(af_inet.c)
 							|-->tcp_v4_init_sock //(tcp_ipv4.c) tcp的init回调函数
 								|-->inet_csk //()
