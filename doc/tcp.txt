@@ -268,6 +268,26 @@ i	|-->struct proto tcp_prot = {
     	.syn_ack_timeout =  tcp_syn_ack_timeout,
 	};
 
+|-->file_operations socket_file_ops //(socket.c)文件系统操作定义
+	|-->static const struct file_operations socket_file_ops = {
+	    .owner =    THIS_MODULE,
+	    .llseek =   no_llseek,
+	    .read_iter =    sock_read_iter,
+	    .write_iter =   sock_write_iter,
+	    .poll =     sock_poll,
+	    .unlocked_ioctl = sock_ioctl,
+#ifdef CONFIG_COMPAT
+    	.compat_ioctl = compat_sock_ioctl,
+#endif
+    	.mmap =     sock_mmap,
+    	.release =  sock_close,
+    	.fasync =   sock_fasync,
+    	.sendpage = sock_sendpage,
+    	.splice_write = generic_splice_sendpage,
+    	.splice_read =  sock_splice_read,
+	};
+
+
 |-->cookie_v4_check //(syncookies.c)
 	|-->tcp_get_cookie_sock //(syncookies.c)
 
@@ -285,6 +305,26 @@ i	|-->struct proto tcp_prot = {
 |-->tcp_v4_rcv //(tcp_ipv4.c) 数据包进入tcp的数据入口
 	|-->pskb_may_pull //(skbuff.h) 对数据包的头做一个校验，用tcp头的大小为基准进行判断
 	|-->skb_checksum_init //(skbuff.h) tcp数据校验
+	|-->__inet_lookup_skb //()
+
+	|-->if (sk->sk_state == TCP_TIME_WAIT)当处于TIME_WAIT状态时直接进入别的分支
+		|-->xfrm4_policy_check //()
+		|-->tcp_v4_fill_cb //()
+		|-->tcp_checksum_complete //()
+		|-->ret = tcp_timewait_state_process //(tcp_minisocks.c)
+			|-->case TCP_FIN_WAIT2:
+				|-->
+
+		|-->switch(ret) 
+			|-->case TCP_TW_SYN:
+
+			|-->case TCP_TW_ACK:
+
+			|-->case TCP_TW_RST:
+
+			|-->case TCP_TW_SUCCESS:
+
+			|-->return 0;
 	
 	|-->if (sk->sk_state == TCP_NEW_SYN_RECV) 当listen着接收到SYN数据包后发送ASK数据包，并再次接收到clinet发送的数据包
 		|-->tcp_v4_fill_cb //()
@@ -376,6 +416,50 @@ i	|-->struct proto tcp_prot = {
 	|-->tcp_segs_in //()
 	|-->sock_owned_by_user //()
 	|-->tcp_v4_do_rcv //(tcp_ipv4.c)
+		|-->if (sk->sk_state == TCP_ESTABLISHED)
+			|-->sock_rps_save_rxhash //()
+			|-->sk_mark_napi_id //()
+			|-->tcp_rcv_established //(tcp_input.c)
+				|-->tcp_checksum_complete //()
+				|-->tcp_validate_incoming //()
+				|-->tcp_rcv_rtt_measure_ts //()
+				|-->tcp_urg //()
+				|-->tcp_data_queue //(tcp_input.c)
+					|-->tcp_ecn_accept_cwr //()
+					|-->tcp_queue_rcv //()
+					|-->tcp_rcv_nxt_update //()
+					|-->tcp_event_data_recv //()
+					|-->if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN) //(tcp_input.c)
+						|-->tcp_fin //(tcp_input.c) 当接收到主动关闭方的发送的数据包时调用该函数
+							|-->sock_set_flag(sk, SOCK_DONE) //(tcp_input.c)
+
+							|-->switch (sk->sk_state)
+								|-->case TCP_SYN_RECV:
+								|-->case TCP_ESTABLISHED:
+									|-->tcp_set_state(sk, TCP_CLOSE_WAIT)
+
+								|-->case TCP_FIN_WAIT1:
+									|-->tcp_send_ack(sk) //
+									|-->tcp_set_state(sk, TCP_CLOSING) //()
+
+								|-->case TCP_FIN_WAIT2:
+									|-->tcp_send_ack //()
+									|-->tcp_time_wait(sk, TCP_TIME_WAIT, 0) //()
+
+							|-->sk->sk_state_change//()参考epoll调用
+
+					|-->tcp_fast_path_check //()
+
+				|-->tcp_data_snd_check //(tcp_input.c)
+					|-->tcp_push_pending_frames //()
+					|-->tcp_check_space //()
+
+				|-->tcp_ack_snd_check //tcp_input.c()
+					|-->__tcp_ack_snd_check //(tcp_input.c)
+						|-->tcp_send_ack //()
+
+			|-->return 0;//
+
 		|-->sock_rps_save_rxhash //()
 		|-->tcp_rcv_state_process //(tcp_input.c)
 			|-->switch(sk->sk_state)
@@ -414,6 +498,12 @@ i	|-->struct proto tcp_prot = {
 									|-->skb_set_tcp_pure_ack //
 									|-->tcp_transmit_skb //(tcp_output.c)
 
+				|-->case case TCP_FIN_WAIT1 //(tcp_input.c)
+					|-->tcp_set_state(sk, TCP_FIN_WAIT2) //
+					|-->sk->sk_shutdown |= SEND_SHUTDOWN //
+					|-->sk->sk_state_change() //()
+					|-->tcp_time_wait(sk, TCP_FIN_WAIT2, tmo) //(tcp_minisocks.c)
+						|-->
 
 	|-->tcp_add_backlog //(tcp_ipv4.c)
 		|-->sk_add_backlog //(sock.h)
@@ -521,7 +611,9 @@ i	|-->struct proto tcp_prot = {
 					|-->expand_files //() 拓展文件表，用于在fd已经超过fd_max时使用
 					|-->__set_open_fd //(file.c)  将分配到的fd放入open链表中
 			
-			|-->sock_alloc_file //()
+			|-->sock_alloc_file //(socket.c)
+				|-->alloc_file(&path, FMODE_READ | FMODE_WRITE, &socket_file_ops)//(file_table.c)绑定sock文件系统
+
 			|-->IS_ERR(newfile) //()
 			|-->fd_install(fd, newfile) //(file.c)
 				|-->__fd_install //(file.c)
@@ -573,6 +665,65 @@ i	|-->struct proto tcp_prot = {
 						|-->sk->sk_prot->hash //()
 
 					|-->sk->sk_max_ack_backlog = backlog; //
+
+|-->close //应用层
+	|-->SYSCALL_DEFINE1(close, unsigned int, fd) //(fs/open.c)
+		|-->__close_fd //(fs/file.c)
+			|-->filp_close //(fs/open.c)
+				|-->fput //(file_table.c)
+					|-->__fput //(file_table.c)
+						|-->file->f_op->release() //(file_table.c)调用fs中定义的release方法，在socket中调用如下
+							|-->sock_close //(socket.c) socket中最终调用的为该方法
+								|-->sock_release //(socket.c)
+									|-->sock->ops->release(sock) //(sock.c)
+										|-->inet_release //(net/ipv4/af_inet.c)
+											|-->sk->sk_prot->close //(af_inet.c)
+												|-->tcp_close //(net/ipv4/tcp.c)
+													|-->if (sk->sk_state == TCP_LISTEN)
+															|-->tcp_set_state(sk, TCP_CLOSE)//
+															|-->inet_csk_listen_stop //()
+															|-->goto adjudge_to_death:
+
+														|-->sk_mem_reclaim //()
+														|-->tcp_close_state //(tcp.c)根据new_state中的枚举进行状态迁移
+															|-->next = (int)new_state[sk->sk_state]
+															|-->ns = next & TCP_STATE_MASK
+															|-->tcp_set_state(sk, ns)//设置状态
+																|-->switch(oldstate)
+																	|-->case TCP_ESTABLISHED:
+																		|-->TCP_FIN_WAIT1 //
+
+																	|-->case TCP_CLOSE_WAIT:
+																		|-->case TCP_LAST_ACK //
+
+														|-->tcp_send_fin //(tcp_output.c)
+															|-->tcp_init_nondata_skb(skb, tp->write_seq, TCPHDR_ACK | TCPHDR_FIN)
+															|-->tcp_queue_skb //()
+
+														|-->sk_stream_wait_close //(stream.c)
+															|-->DEFINE_WAIT_FUNC(wait, woken_wake_function) //(wait.h)
+																|-->.func       = function //(wait.h)
+
+															|-->add_wait_queue //(wait.c)
+																|-->__add_wait_queue //(wait.h)
+
+															|-->sk_wait_event(sk, &timeout, !sk_stream_closing(sk), &wait)//(sock.h)
+																|-->release_sock //(sock.c)
+																	|-->sk->sk_prot->release_cb //(sock.c)
+																		|-->tcp_release_cb //(tcp_output.c)
+																			|-->sock_release_ownership //()
+																			|-->__sock_put //(sock.h)
+
+																|-->wait_woken //()
+																|-->sched_annotate_sleep //(kernel.h)
+																	|-->current->task_state_change = 0 //(kernel.h)
+
+															|-->remove_wait_queue //(wait.c)
+																|-->__remove_wait_queue //(wait.h)
+adjudge_to_death:
+														|-->sock_hold //()
+														|-->sock_orphan //()
+														|-->release_sock //()
 
 |-->tcp_rcv_synsent_state_process //(tcp_input.c)
 	|-->if (th->syn)
