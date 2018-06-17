@@ -301,6 +301,11 @@ i	|-->struct proto tcp_prot = {
 |-->inet_csk_accept //(inet_connection_sock.c)
 	|-->reqsk_queue_remove //(request_sock.h)
 		|-->sk_acceptq_removed //(sock.h) 减少sk_ack_backlog的值
+
+|-->tcp_time_wait //(tcp_minisocks.c)
+	|-->inet_twsk_alloc //(inet_timewait_sock.c)
+		|-->tw->tw_state        = TCP_TIME_WAIT
+		|-->tw->tw_substate     = state
 	
 |-->tcp_v4_rcv //(tcp_ipv4.c) 数据包进入tcp的数据入口
 	|-->pskb_may_pull //(skbuff.h) 对数据包的头做一个校验，用tcp头的大小为基准进行判断
@@ -504,6 +509,15 @@ i	|-->struct proto tcp_prot = {
 					|-->sk->sk_state_change() //()
 					|-->tcp_time_wait(sk, TCP_FIN_WAIT2, tmo) //(tcp_minisocks.c)
 						|-->
+
+				|-->case TCP_CLOSING //
+					|-->tcp_time_wait(sk, TCP_TIME_WAIT, 0) //
+
+				|-->case TCP_LAST_ACK//
+					|-->tcp_update_metrics //()
+					|-->tcp_done //(tcp.c)
+						|-->tcp_set_state(sk, TCP_CLOSE) //
+						|-->sk->sk_shutdown = SHUTDOWN_MASK //
 
 	|-->tcp_add_backlog //(tcp_ipv4.c)
 		|-->sk_add_backlog //(sock.h)
