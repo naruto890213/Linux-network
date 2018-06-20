@@ -1,8 +1,45 @@
+重要的结构体
+typedef struct {
+    unsigned int size;      /* sizes of items */
+    unsigned int perslab;   /* how many items per slab */
+
+    void *slots;           /* list of item ptrs */
+    unsigned int sl_curr;   /* total free items in list */
+
+    unsigned int slabs;     /* how many slabs were allocated for this class */
+
+    void **slab_list;       /* array of slab pointers */
+    unsigned int list_size; /* size of prev array */
+
+    size_t requested; /* The number of requested bytes */
+} slabclass_t; //(slabs.c)
+
+#define MAX_NUMBER_OF_SLAB_CLASSES (63 + 1) //(memcached.h)
+static slabclass_t slabclass[MAX_NUMBER_OF_SLAB_CLASSES] //(slabs.c) 全局变量
+
+m --> settings.maxbytes
+settings.item_size_max > (settings.maxbytes / 2)
+
 |-->main //(memcached.c)
-	|-->settings_init //()
-	|-->init_lru_maintainer //()
-	|-->event_init //()
+	|-->settings_init //(memcached.c) 设置默认参数，设置settings全局变量的默认参数
+		|-->settings.maxbytes = 64 * 1024 * 1024 //(64M)
+		|-->settings.factor = 1.25 //
+		|-->settings.slab_page_size = 1024 * 1024 //
+		|-->settings.slab_chunk_size_max = settings.slab_page_size / 2
+		|-->settings.chunk_size = 48
+		
+	|-->init_lru_maintainer //(items.c) 初始化互斥锁和全局变量
+		|-->pthread_mutex_init(&lru_maintainer_lock, NULL) 
+		|-->lru_maintainer_initialized = 1 
+	
+	|-->event_init //调用libevent库，创建事件
+	|-->logger_init //()
+	|-->stats_init //()
+	|-->assoc_init //()
 	|-->conn_init //()
+	|-->slabs_init(settings.maxbytes, settings.factor, preallocate, use_slab_sizes ? slab_sizes : NULL) //(slabs.c)
+		|-->
+	
 	|-->memcached_thread_init //(thread.c)
 		|-->setup_thread //(thread.c)
 			|-->thread_libevent_process //(thread.c)
