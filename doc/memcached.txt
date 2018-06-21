@@ -77,13 +77,91 @@ settings.item_size_max > (settings.maxbytes / 2)
 										|-->conn_new_cmd //
 											|-->--nreqs //
 											|-->if (nreqs >= 0)
-												|-->reset_cmd_handler
-											|-->else
-												|-->stop = true
+												|-->reset_cmd_handler //(memcached.c)
+													|-->conn_shrink(c) //(memcached.c) 调整内存
+													|-->if (c->rbytes > 0)
+														|-->conn_set_state(c, conn_parse_cmd) //正常情况下进入该状态,再次进入while循环
+													|-->else
+														|-->conn_set_state(c, conn_waiting)
+											|-->else //(nreqs < 0)
+												|-->stop = true //退出while循环
 											
 										|-->case conn_parse_cmd //处理用户输入的指令
 											|-->ret = try_read_command //(memcached.c) 读取指令
-												|-->process_command //()
+												|-->process_command //(memcached.c)
+													|-->add_msghdr //(memcached.c)
+														|-->
+
+													|-->tokenize_command //(memcached.c)
+														|-->
+
+													|-->switch(cmd)
+														|-->case "get" || "bget"
+															|-->process_get_command //()
+
+														|-->case "add" || "set" || "replace" || "prepend" || "append"
+															|-->process_update_command(c, tokens, ntokens, comm, false)
+																|-->set_noreply_maybe //()
+																|-->判断key值的长度(不能大于250),否则返回错误
+																|-->item_alloc //(thread.c)
+																	|-->do_item_alloc //(items.c)
+																		|-->item_make_header //(items.c) 计算数据存储长度
+																		|-->slabs_clsid //(slabs.c)
+																			|-->通过while对比slabclass.size的大小,从而返回对应的索引值(slabclass.szie在slabs_init中预分配)
+																		|-->判断种大小是否超过settings.slab_chunk_size_max
+																			|-->超过
+																				|-->
+
+																			|-->不超过
+																				|-->do_item_alloc_pull //(items.c)
+																					|-->slabs_alloc //(slabs.c)
+																						|-->do_slabs_alloc //(slabs.c)
+																							|-->
+
+																|-->
+																|-->conn_set_state(c, conn_nread) //设置状态机
+
+														|-->case "cas"
+															|-->process_update_command(c, tokens, ntokens, comm, true)
+
+														|-->case "inc"
+															|-->process_arithmetic_command//
+
+														|-->case "gets"
+															|-->process_get_command //()
+
+														|-->case "decr"
+															|-->process_arithmetic_command //()
+
+														|-->case "delete"
+															|-->process_delete_command //()
+
+														|-->case "touch"
+															|-->process_touch_command //()
+
+														|-->case "gat"
+															|-->process_get_command(c, tokens, ntokens, false, true) //
+
+														|-->case "gats"
+															|-->process_get_command(c, tokens, ntokens, true, true) //
+
+														|-->case "stats"
+															|-->process_stat //()
+
+														|-->case "flush_all"
+															|-->
+
+														|-->case "version"
+															|-->out_string //
+
+														|-->case "quit"
+															|-->conn_set_state(c, conn_closing) //
+
+														|-->case "shutdown"
+															|-->
+
+														|-->case "slabs"
+															|-->
 												
 											|-->if(0 == ret)
 												|-->conn_set_state(c, conn_waiting) //将状态置为waiting状态
