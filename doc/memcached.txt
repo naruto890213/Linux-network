@@ -39,18 +39,54 @@ settings.item_size_max > (settings.maxbytes / 2)
 	|-->conn_init //()
 	|-->slabs_init(settings.maxbytes, settings.factor, preallocate, use_slab_sizes ? slab_sizes : NULL) //(slabs.c)
 		|-->
+		
+	|-->if (settings.socketpath == NULL) //默认进入该分支
+		|-->server_sockets //(memcached.c) 创建listen socket
+			|-->server_socket //(memcached.c)
+				|-->new_socket //(memcached.c) 创建socket并将之设置为O_NONBLOCK
+				|-->setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (void *)&flags, sizeof(flags)) 
+				|-->setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flags, sizeof(flags))
+				|-->setsockopt(sfd, SOL_SOCKET, SO_LINGER, (void *)&ling, sizeof(ling))
+				|-->setsockopt(sfd, IPPROTO_TCP, TCP_NODELAY, (void *)&flags, sizeof(flags))
+				|-->conn_new //()
+					|-->event_set(&c->event, sfd, event_flags, event_handler, (void *)c) //将创建的listen句柄绑定到event_handler函数
+						|-->event_handler //(memcached.c) 当listener接收到数据时会调用到该函数
+							|-->drive_machine //(memcached.c)
+								|-->switch(c->state)
+									|-->case conn_listening //监听状态，用于处理新接入的用户请求
+										|-->accept
+										|-->dispatch_conn_new //(thread.c)
+											|-->item->init_state = conn_new_cmd //将状态机设置为conn_new_cmd，等待用户输入命令
+											|-->item->mode = queue_new_conn //(threads.c) 设置mode状态机
+											|-->write //通过 notify_send_fd 向pipe中写入一个字节'c'来通知对应的线程(pipe中不是原子的，所以写入一个字节确保不会出现数据紊乱)
+	
 	
 	|-->memcached_thread_init //(thread.c)
+		|-->pipe(fds) //创建管道用于通信
+		|-->threads[i].notify_receive_fd = fds[0] 
+		|-->threads[i].notify_send_fd = fds[1] 
 		|-->setup_thread //(thread.c)
+			|-->event_set(&me->notify_event, me->notify_receive_fd, EV_READ | EV_PERSIST, thread_libevent_process, me)//将notify_receive_fd绑定到thread_libevent_process
 			|-->thread_libevent_process //(thread.c)
-				|-->conn_new //(memcached.c)
-					|-->event_handler //(memcached.c)
-						|-->drive_machine //(memcached.c)
-							|-->case conn_listening
-								|-->accept
-								|-->dispatch_conn_new //(thread.c)
-									|-->item->mode = queue_new_conn //(threads.c)
-									|-->write //写pipe来通知对应的线程
+				|-->switch(switch (buf[0]))
+					|-->case 'c': //
+						|-->conn_new //(memcached.c)
+							|-->event_handler //(memcached.c)
+								|-->drive_machine //(memcached.c)
+									|-->switch(c->state)
+										|-->conn_new_cmd //
+											|-->--nreqs //
+											|-->if (nreqs >= 0)
+												|-->reset_cmd_handler
+											|-->else
+												|-->stop = true
+											
+										|-->case conn_parse_cmd //处理用户输入的指令
+											|-->ret = try_read_command //(memcached.c) 读取指令
+												|-->process_command //()
+												
+											|-->if(0 == ret)
+												|-->conn_set_state(c, conn_waiting) //将状态置为waiting状态
 
 		|-->create_worker(worker_libevent, &threads[i]) //(thread.c)
 			|-->worker_libevent //(thread.c)
