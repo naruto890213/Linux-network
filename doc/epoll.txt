@@ -1,7 +1,59 @@
+//epoll中重要的结构体
+|-->struct epitem //(fs/eventpoll.c)
+|-->struct epitem {
+	    union {
+	        struct rb_node rbn;
+	        struct rcu_head rcu;
+	    };
+	
+	    struct list_head rdllink;
+	    struct epitem *next;
+	    struct epoll_filefd ffd;
+	
+	    int nwait;
+	
+	    struct list_head pwqlist;
+	
+	    struct eventpoll *ep;
+	
+	    struct list_head fllink;
+	    struct wakeup_source __rcu *ws;
+	    struct epoll_event event;
+	};
+
+|-->struct eventpoll //(fs/eventpoll.c)epoll的私有数据和主要成员结构体
+	|-->struct eventpoll {
+	    spinlock_t lock; 
+	    struct mutex mtx;
+	
+	    wait_queue_head_t wq;
+	
+	    wait_queue_head_t poll_wait;
+	
+	    struct list_head rdllist;
+	
+	    struct rb_root_cached rbr;
+		struct epitem *ovflist;
+	
+	    struct wakeup_source *ws;
+	
+	    struct user_struct *user;
+	
+	    struct file *file;
+	
+	    int visited;
+	    struct list_head visited_list_link;
+	
+	#ifdef CONFIG_NET_RX_BUSY_POLL
+	    unsigned int napi_id;
+	#endif
+	};
+
+
 |-->SYSCALL_DEFINE1(epoll_create, int, size) //(fs/eventpoll.c)
 	|-->sys_epoll_create1 //(eventpoll.c)
 		|-->SYSCALL_DEFINE1(epoll_create1, int, flags) //(eventpoll.c)
-			|-->ep_alloc //(eventpoll.c)
+			|-->ep_alloc //(eventpoll.c) 分配空间
 			|-->get_unused_fd_flags //()
 			|-->anon_inode_getfile("[eventpoll]", &eventpoll_fops, ep, O_RDWR | (flags & O_CLOEXEC)) //(anon_inodes.c)
 				|-->mntget //()
@@ -22,19 +74,14 @@
 			|-->init_poll_funcptr(&epq.pt, ep_ptable_queue_proc) //(poll.h)
 				|-->pt->_qproc = qproc //(poll.h)
 
+			|-->ep_set_ffd //(eventpoll.c) 将epoll的和socket的文件系统绑定到一起
 			|-->ep_item_poll //(eventpoll.c)
 				|-->epi->ffd.file->f_op->poll //(eventpoll.c)
-					|-->ep_eventpoll_poll //(eventpoll.c)
-						|-->poll_wait //(poll.h)
-							|-->p->_qproc(filp, wait_address, p) //(poll.h)
-								|-->ep_ptable_queue_proc //(eventpoll.c)
-									|-->init_waitqueue_func_entry(&pwq->wait, ep_poll_callback) //(wait.h)
-										|-->wq_entry->func      = func; //(wait.h)
-
-						|-->ep_call_nested(&poll_readywalk_ncalls, EP_MAX_NESTS,
-                   				ep_poll_readyevents_proc, &arg, ep, current) //(eventpoll.c)
-							|-->ep_poll_readyevents_proc //(eventpoll.c)
-								|-->ep_read_events_proc //(eventpoll.c)
+					|-->sock_poll //(eventpoll.c) 具体参见tcp.txt中的socket系统调用底层
+						|-->sock->ops->poll //(socket.c) 当为tcp协议时调用
+							|-->tcp_poll //(net/ipv4/tcp.c)
+								|-->sock_poll_wait //(sock.h)
+									|-->poll_wait //(poll.h)
 
 			|-->ep_rbtree_insert //()
 			|-->ep_set_busy_poll_napi_id //()
@@ -49,7 +96,10 @@
 									|-->__wake_up_common //(wait.c)
 										|-->curr->func(curr, mode, wake_flags, key) //(wait.c)
 											|-->ep_poll_callback //(eventpoll.c)
-												|-->
+												|-->wake_up_locked(&ep->wq) //如果有符合的则调用该函数进行唤醒
+													|-->cur->func //(wait.h)
+														|-->default_wake_function //(kernel/sched/core.c)最终调用进程唤醒函数
+															|-->try_to_wake_up //(core.c) 唤醒进程
 
 	|-->EPOLL_CTL_DEL:
 		|-->ep_remove //()
@@ -66,25 +116,58 @@
 			|-->if(timeout > 0)
 				
 			|-->else if (timeout == 0) 
+			
+			|-->if (!ep_events_available(ep)) //当前无任何事件到来
+				|-->init_waitqueue_entry(&wait, current) //(eventpoll.c)
+					|-->wq_entry->func      = default_wake_function //(wait.h) 设置进程唤醒函数,用于ep_poll_callback中的wake_up_locked
+				|-->__add_wait_queue_exclusive(&ep->wq, &wait) //(eventpoll.c) 加入到等待队列中
+				|-->loop //进入for循环中,等待ep_poll_callback唤醒或者是到超时时间
+					|-->set_current_state(TASK_INTERRUPTIBLE) //设置进程状态为可中断唤醒,用于ep_poll_callback唤醒进程调度
+					|-->fatal_signal_pending //(eventpoll.c)
+					|-->if( ep_events_available || timeout) //判断是等待队列中是否有准备就绪的队列或者是超时
+						|-->break;
+
+					|-->signal_pending //()
+					|-->ret = schedule_hrtimeout_range(to, slack, HRTIMER_MODE_ABS) //(hrtimer.c)等待被唤醒或者超
+						|-->schedule_hrtimeout_range_clock //(hrtimer.c) 如果timeout为0则直接返回,并将当前进程置为running
+
+					|-->if (0 == ret) //如果被ep_poll_callback唤醒或者超时
+						|-->timed_out = 1 //再次进入循环时再上面的判断中break,退出loop
+
+				|-->__remove_wait_queue(&ep->wq, &wait) //将其从等待队列中移除
+				|-->__set_current_state(TASK_RUNNING) //设置进程状态
 				
 			|-->ep_send_events //(eventpoll.c)
 				|-->ep_scan_ready_list(ep, ep_send_events_proc, &esed, 0, false) //(eventpoll.c)
+					|-->eventcnt = 0;
+					|-->ep->ovflist = NULL //设置此值,防止ep_poll_callback设置
 					|-->ep_send_events_proc //(eventpoll.c)
-						|-->ep_item_poll //(eventpoll.c) 见上面
-							|-->epi->ffd.file->f_op->poll(epi->ffd.file, pt) //(eventpoll.c)
-								|-->ep_eventpoll_poll //(eventpoll.c)
-									|-->poll_wait //(poll.h)
-										|-->p->_qproc(filp, wait_address, p) //(poll.h)
-											|-->ep_ptable_queue_proc //(eventpoll.c)
-												|-->init_waitqueue_func_entry(&pwq->wait, ep_poll_callback) //(wait.h)
-													|-->wq_entry->func      = func; //(wait.h)
+						|-->init_poll_funcptr(&pt, NULL) //(eventpoll.c)
+							|-->pt->_qproc = NULL //将_qproc设置为空
 
-									|-->ep_call_nested(&poll_readywalk_ncalls, EP_MAX_NESTS, ep_poll_readyevents_proc, &arg, ep, current) //(eventpoll.c)
-										|-->(*nproc)(priv, cookie, call_nests)//(eventpoll.c)
-											|-->ep_poll_readyevents_proc //(eventpoll.c)
-												|-->ep_scan_ready_list(arg->ep, ep_read_events_proc, NULL, call_nests + 1, arg->locked)//(eventpoll.c)
-													|-->(*sproc)(ep, &txlist, priv) //(eventpoll.c)
-														|-->ep_read_events_proc //(eventpoll.c)
-															|-->init_poll_funcptr(&pt, NULL) //(eventpoll.c)
-															|-->ep_item_poll //(eventpoll.c)
+						|-->ret = ep_item_poll //(eventpoll.c) 见上面
+							|-->epi->ffd.file->f_op->poll(epi->ffd.file, pt) || epi->event.events //(eventpoll.c)
+								|-->sock_poll //(socket.c)
+									|-->sock->ops->poll //(socket.c)
+										|-->tcp_poll //(tcp.c) 
+											|-->sock_poll_wait //(sock.h)
+												|-->if(!poll_does_not_wait)
+													|-->return p == NULL || p->_qproc == NULL //(poll.h)
+
+												|-->else
+													|-->poll_wait //(poll.h)
+
+											|-->return mask; //最终返回掩码
+						|-->if(ret > 0)
+							|-->__put_user(epi->event.data, &uevent->data) //将数据从kernel拷贝到usr空间
+							|-->eventcnt++
+							|-->uevent++
+
+							|-->if (epi->event.events & EPOLLONESHOT)
+								|-->epi->event.events &= EP_PRIVATE_BITS;
+
+							|-->if (!(epi->event.events & EPOLLET)) //如果没有设置ET模式
+								|-->list_add_tail(&epi->rdllink, &ep->rdllist) //重新将其添加到rdlink队列中
+								|-->ep_pm_stay_awake //
 															
+					|-->ep->ovflist = EP_UNACTIVE_PTR //设置状态

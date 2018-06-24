@@ -518,6 +518,8 @@ i	|-->struct proto tcp_prot = {
 					|-->tcp_done //(tcp.c)
 						|-->tcp_set_state(sk, TCP_CLOSE) //
 						|-->sk->sk_shutdown = SHUTDOWN_MASK //
+						|-->if (!sock_flag(sk, SOCK_DEAD))
+							|-->sk->sk_state_change //(tcp.c)
 
 	|-->tcp_add_backlog //(tcp_ipv4.c)
 		|-->sk_add_backlog //(sock.h)

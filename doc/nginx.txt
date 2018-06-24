@@ -1,0 +1,8 @@
+|-->ngx_process_events_and_timers //(ngx_event.c) 处理不同的事件
+	|-->ngx_trylock_accept_mutex //(ngx_event_accept.c)
+		|-->ngx_shmtx_trylock //()
+		|-->
+
+	|-->ngx_process_events(cycle, timer, flags) //实际调用ngx_epoll_process_events函数开始处理
+		|-->ngx_epoll_process_events //(ngx_epoll_module.c)
+			|-->epoll_wait //(ngx_process_events.c)
