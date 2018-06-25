@@ -82,6 +82,13 @@
 							|-->tcp_poll //(net/ipv4/tcp.c)
 								|-->sock_poll_wait //(sock.h)
 									|-->poll_wait //(poll.h)
+										|-->if (p && p->_qproc && wait_address)
+											|-->p->_qproc //(poll.h)
+												|-->ep_ptable_queue_proc //(eventpoll.c)
+													|-->init_waitqueue_func_entry(&pwq->wait, ep_poll_callback) //(wait.h)设置回调函数
+														|--> wq_entry->func      = ep_poll_callback //(wait.h) 设置回调函数，用于在数据接收或者fd变化是调用，sk_state_change
+														
+													|-->list_add_tail(&pwq->llink, &epi->pwqlist) //(eventpoll.c) 添加到队列
 
 			|-->ep_rbtree_insert //()
 			|-->ep_set_busy_poll_napi_id //()
@@ -106,9 +113,6 @@
 
 	|-->EPOLL_CTL_MOD:
 		|-->ep_modify //()
-
-	|-->
-
 
 |-->epoll_wait //
 	|-->SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events, int, maxevents, int, timeout)//(eventpoll.c)
@@ -149,7 +153,10 @@
 							|-->epi->ffd.file->f_op->poll(epi->ffd.file, pt) || epi->event.events //(eventpoll.c)
 								|-->sock_poll //(socket.c)
 									|-->sock->ops->poll //(socket.c)
-										|-->tcp_poll //(tcp.c) 
+										|-->tcp_poll //(tcp.c)
+											|-->sk_sleep(sk) //(sock.h)
+												|-->&rcu_dereference_raw(sk->sk_wq)->wait //(sock.h) 这里将初始化绑定sk_wq将在后续的sk_state_change中被调用
+												
 											|-->sock_poll_wait //(sock.h)
 												|-->if(!poll_does_not_wait)
 													|-->return p == NULL || p->_qproc == NULL //(poll.h)

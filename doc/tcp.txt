@@ -287,7 +287,14 @@ i	|-->struct proto tcp_prot = {
     	.splice_read =  sock_splice_read,
 	};
 
+|-->timewait处理方法定义 //(net/ipv4/tcp_ipv4.c)
+	|-->static struct timewait_sock_ops tcp_timewait_sock_ops = {
+		.twsk_obj_size  = sizeof(struct tcp_timewait_sock),
+		.twsk_unique    = tcp_twsk_unique,
+		.twsk_destructor= tcp_twsk_destructor,
+	};
 
+	
 |-->cookie_v4_check //(syncookies.c)
 	|-->tcp_get_cookie_sock //(syncookies.c)
 
@@ -540,7 +547,14 @@ i	|-->struct proto tcp_prot = {
 									|-->sk_rcv_saddr_set //()
 									|-->sk_daddr_set //()
 									|-->tcp_set_state(sk, TCP_SYN_SENT) //(net/ipv4/tcp.c) 设置sk的状态为TCP_SYN_SENT
-									|-->inet_hash_connect //()
+									|-->inet_hash_connect //(inet_hashtables.c)
+										|-->__inet_check_established //(inet_hashtables.c)
+											|-->twsk_unique //(timewait_sock.h)
+												|-->if (sk->sk_prot->twsk_prot->twsk_unique != NULL)
+													|-->sk->sk_prot->twsk_prot->twsk_unique //(timewait_sock.h) 调用的实际函数为tcp_twsk_unique
+														|-->tcp_twsk_unique //(tcp_ipv4.c)
+															|-->init_net.ipv4.sysctl_tcp_tw_reuse //(/proc/sys/net/ipv4/tcp_tw_reuse) 如果该变量开启后会将time_wait重用, 该值只使用于client端
+					
 									|-->sk_set_txhash //()
 									|-->ip_route_newports //()
 									|-->tp->write_seq = secure_tcp_seq(inet->inet_saddr,
@@ -661,6 +675,10 @@ i	|-->struct proto tcp_prot = {
 				|-->return file->private_data //(socket.c)
 			
 		|-->if(sock)
+			|-->somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn //(socket.c) 可通过/proc/sys/net/ipv4/tcp_max_tw_buckets 查看，默认为128
+			|-->if ((unsigned int)backlog > somaxconn) 当传入的数值大于somaxconn时采用系统数值(默认为128)
+				|-->backlog = somaxconn //(socket.c)
+				
 			|-->sock_net //(sock.h)
 				|-->read_pnet //(net_namespace.h)
 					|-->return &init_net;
@@ -751,3 +769,7 @@ adjudge_to_death:
 		|-->tcp_create_openreq_child //(net/ipv4/tcp_minisocks.c)
 			|-->inet_csk_clone_lock //(inet_connection_sock.c)
 				|-->newsk->sk_state = TCP_SYN_RECV //(inet_connection_sock.c)
+				
+				
+|-->tcp_v4_connect
+	|-->tcp_death_row.sysctl_tw_recycle //对应/proc/sys/net/ipv4/tcp_tw_recycle

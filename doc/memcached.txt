@@ -108,7 +108,7 @@ settings.item_size_max > (settings.maxbytes / 2)
 																		|-->item_make_header //(items.c) 计算数据存储长度
 																		|-->slabs_clsid //(slabs.c)
 																			|-->通过while对比slabclass.size的大小,从而返回对应的索引值(slabclass.szie在slabs_init中预分配)
-																		|-->判断种大小是否超过settings.slab_chunk_size_max
+																		|-->判断种大小是否超过settings.slab_chunk_size_max(该值默认为512K)
 																			|-->超过
 																				|-->
 
