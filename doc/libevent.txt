@@ -149,10 +149,205 @@
 	    enum event_base_config_flag flags;
 	};  
 
+static const struct eventop epollops_changelist = {
+    "epoll (with changelist)",
+    epoll_init,
+    event_changelist_add_,
+    event_changelist_del_,
+    epoll_dispatch,
+    epoll_dealloc,
+    1, /* need reinit */
+    EV_FEATURE_ET|EV_FEATURE_O1| EARLY_CLOSE_IF_HAVE_RDHUP,
+    EVENT_CHANGELIST_FDINFO_SIZE
+};
+
+	
+const struct eventop epollops = { 
+    "epoll",
+    epoll_init,
+    epoll_nochangelist_add,
+    epoll_nochangelist_del,
+    epoll_dispatch,
+    epoll_dealloc,
+    1, /* need reinit */
+    EV_FEATURE_ET|EV_FEATURE_O1|EV_FEATURE_EARLY_CLOSE,
+    0   
+};
+
+static const struct eventop evsigops = {
+    "signal",
+    NULL,
+    evsig_add,
+    evsig_del,
+    NULL,
+    NULL,
+    0, 0, 0
+};
+
+
+
+|-->eventops //(event.c)操作方法定义，根据系统支持进行选择
+static const struct eventop *eventops[] = {
+#ifdef EVENT__HAVE_EVENT_PORTS
+    &evportops,
+#endif
+#ifdef EVENT__HAVE_WORKING_KQUEUE
+    &kqops,
+#endif
+#ifdef EVENT__HAVE_EPOLL
+    &epollops, //linux下默认选择为epoll
+#endif
+#ifdef EVENT__HAVE_DEVPOLL
+    &devpollops,
+#endif
+#ifdef EVENT__HAVE_POLL
+    &pollops,
+#endif
+#ifdef EVENT__HAVE_SELECT
+    &selectops,
+#endif
+#ifdef _WIN32
+    &win32ops,
+#endif
+    NULL
+};
+
+
+
 
 |-->event_base_new //(event.c) 新建一个base实例
 	|-->event_config_new //(event.c)
+		|-->cfg = mm_calloc(1, sizeof(*cfg))
+		|-->TAILQ_INIT(&cfg->entries)
+		|-->cfg->max_dispatch_interval.tv_sec = -1
+		|-->cfg->max_dispatch_callbacks = INT_MAX
+		|-->cfg->limit_callbacks_after_prio = 1
+		
 	|-->event_base_new_with_config //(event.c)
-		|-->
+		|-->base = mm_calloc(1, sizeof(struct event_base))
+		|-->base->sig.ev_signal_pair[0] = -1
+		|-->base->sig.ev_signal_pair[1] = -1
+		|-->base->th_notify_fd[0] = -1
+		|-->base->th_notify_fd[1] = -1
+		|-->base->evbase = NULL
+		|-->event_config_is_avoided_method(cfg, eventops[i]->name) //判断是否可用
+		|-->base->evsel = eventops[i] //将全局变量赋值给base中的变量，在linux中默认为 epollops
+		|-->base->evbase = base->evsel->init(base)
+			|-->epoll_init //(epoll.c)
+				|-->evsig_init_ //(signal.c)
+					|-->base->evsigsel = &evsigops
+				
+		|-->event_base_priority_init(base, 1) //(event.c)
+			|-->base->nactivequeues = npriorities //设置active队列个数，将在dispatch中使用
 
+		|-->evthread_make_base_notifiable //(event.c)
+			|-->evthread_make_base_notifiable_nolock_ //(event.c)
+				|-->evutil_make_internal_pipe_(base->th_notify_fd) //(evutil.c)
+					|-->pipe //创建管道，用于绑定
+					|-->evutil_fast_socket_nonblocking //设置为非阻塞
+					|-->evutil_fast_socket_closeonexec //关闭执行权限
+					|-->return 0 
+					
+				|-->base->th_notify_fn = evthread_notify_base_default //设置提醒函数
+				|-->cb = evthread_notify_drain_default //(event.c)
+					|-->
+				
+				|-->event_assign(&base->th_notify, base, base->th_notify_fd[0], EV_READ|EV_PERSIST, cb, base) //设置回调函数
+				|-->return event_add_nolock_ //(event.c)
+					|-->if (ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED))
+						|-->evmap_io_add_ //(evmap.c)
+							|-->evsel->add //(evmap.c) 调用回调函数
+								|-->epoll_nochangelist_add //(epoll.c)
+									|-->if(events & EV_WRITE)
+										|-->ch.write_change = EV_CHANGE_ADD | (events & EV_ET)
+										
+									|-->if (events & EV_READ)
+										|-->ch.read_change = EV_CHANGE_ADD | (events & EV_ET)
+										
+									|-->if (events & EV_CLOSED)
+										|-->ch.close_change = EV_CHANGE_ADD | (events & EV_ET)
+									
+									|-->epoll_apply_changes //(epoll.c)
+										|-->if ((ch->read_change|ch->write_change) & EV_CHANGE_ET)
+											|-->events |= EPOLLET
+											
+										|-->epoll_apply_one_change //(epoll.c)
+											|-->epoll_ctl //(epoll.c) 设置epoll
+						
+					|-->else if (ev->ev_events & EV_SIGNAL)
+						|-->evmap_signal_add_ //(evmap.c)
+							|-->evsel = base->evsigsel
+							|-->evsel->add(base, ev->ev_fd, 0, EV_SIGNAL, NULL) //(evmap.c) 调用回调函数
+								|--> evsig_add//(signal.c)
+									|-->
+						
+					
+					|-->event_queue_insert_inserted //()
+					
 	|-->event_config_free //()
+	
+
+|-->running_loop 
+|-->event_base_loopbreak
+|-->event_base_loopcontinue
+
+|-->event_callback_activate_ 
+|-->event_deferred_cb_schedule_
+	
+|-->event_callback_activate_later_nolock_ //(event.c)
+|-->event_callback_activate_nolock_ //(event.c)
+	|-->evthread_notify_base //(event.c)
+		|-->base->th_notify_fn //(event.c) 
+			|-->evthread_notify_base_default //(event.c) 实际调用的为该函数
+				|-->buf[0] = (char) 0
+				|-->write(base->th_notify_fd[1], buf, 1) //写入一个字节
+
+
+|-->event_set //(event.c)
+	|-->event_assign //(event.c)
+		|-->ev->ev_callback = callback
+		|-->ev->ev_fd = fd
+		|-->ev->ev_events = events
+		|-->ev->ev_flags = EVLIST_INIT
+		|-->ev->ev_ncalls = 0
+		|-->ev->ev_pncalls = NULL
+		|-->if (events & EV_SIGNAL)
+			|-->ev->ev_closure = EV_CLOSURE_EVENT_SIGNAL
+		
+		|-->else
+			|-->if (events & EV_PERSIST)
+				|-->ev->ev_closure = EV_CLOSURE_EVENT_PERSIST
+			
+			|-->else
+				|-->ev->ev_closure = EV_CLOSURE_EVENT
+
+
+|-->epoll_nochangelist_add //(epoll.c)
+	|-->epoll_apply_changes //(epoll.c)
+		|-->epoll_apply_one_change //(epoll.c)
+
+|-->event_loop //(event.c)
+	|-->event_base_loop //(event.c)
+		|-->loop
+			|-->evsel->dispatch //(event.c)
+				|-->epoll_dispatch //(epoll.c)
+					|-->epoll_wait //(epoll.c)
+					|-->evmap_io_active_ //(evmap.c)
+						|-->
+				
+			|-->event_process_active //(event.c)
+				|-->if(base->nactivequeues)
+					|-->event_process_active_single_queue //(event.c)
+						switch (evcb->evcb_closure)
+							|-->case EV_CLOSURE_EVENT_SIGNAL:
+								|-->event_signal_closure //(event.c)
+									|-->ncalls = ev->ev_ncalls
+									|-->while(ncalls)
+										|-->(*ev->ev_callback)(ev->ev_fd, ev->ev_res, ev->ev_arg) //调用event_set中设置的回调函数
+										
+							|-->case EV_CLOSURE_EVENT_PERSIST:
+								|-->event_persist_closure //(event.c)
+									|-->(evcb_callback)(evcb_fd, evcb_res, evcb_arg) //调用event_set中设置的回调函数
+								
+							|-->case EV_CLOSURE_EVENT:
+								|-->(*ev->ev_callback)(ev->ev_fd, ev->ev_res, ev->ev_arg)
