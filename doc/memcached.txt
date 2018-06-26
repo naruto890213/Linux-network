@@ -17,6 +17,15 @@ typedef struct {
 #define MAX_NUMBER_OF_SLAB_CLASSES (63 + 1) //(memcached.h)
 static slabclass_t slabclass[MAX_NUMBER_OF_SLAB_CLASSES] //(slabs.c) 全局变量
 
+#define HOT_LRU 0 //hot数据区
+#define WARM_LRU 64 //warm数据区
+#define COLD_LRU 128 //cold数据区
+#define TEMP_LRU 192 //没有过期时间数据区
+
+#define CLEAR_LRU(id) (id & ~(3<<6)) //最原始的数据区,即hot数据区
+#define GET_LRU(id) (id & (3<<6)) //
+#define LARGEST_ID POWER_LARGEST //lru数组最大值256,即0-255
+
 m --> settings.maxbytes
 settings.item_size_max > (settings.maxbytes / 2)
 
@@ -27,6 +36,12 @@ settings.item_size_max > (settings.maxbytes / 2)
 		|-->settings.slab_page_size = 1024 * 1024 //
 		|-->settings.slab_chunk_size_max = settings.slab_page_size / 2
 		|-->settings.chunk_size = 48
+		|-->settings.lru_segmented = true 
+		|-->settings.hot_lru_pct = 20 
+		|-->settings.warm_lru_pct = 40
+		|-->settings.hot_max_factor = 0.2
+		|-->settings.warm_max_factor = 2.0
+		|-->settings.temp_lru = false
 		
 	|-->init_lru_maintainer //(items.c) 初始化互斥锁和全局变量
 		|-->pthread_mutex_init(&lru_maintainer_lock, NULL) 
@@ -104,7 +119,7 @@ settings.item_size_max > (settings.maxbytes / 2)
 																|-->set_noreply_maybe //()
 																|-->判断key值的长度(不能大于250),否则返回错误
 																|-->item_alloc //(thread.c)
-																	|-->do_item_alloc //(items.c)
+																	|-->do_item_alloc //(items.c) 惰性分配
 																		|-->item_make_header //(items.c) 计算数据存储长度
 																		|-->slabs_clsid //(slabs.c)
 																			|-->通过while对比slabclass.size的大小,从而返回对应的索引值(slabclass.szie在slabs_init中预分配)
@@ -182,4 +197,44 @@ settings.item_size_max > (settings.maxbytes / 2)
 
 	|-->event_base_loop //()
 
+typedef struct {
+    slab_automove_init_func init;
+    slab_automove_free_func free;
+    slab_automove_run_func run;
+} slab_automove_reg_t; //(slab_automove.h)
 
+slab_automove_reg_t slab_automove_default = {
+    .init = slab_automove_init,
+    .free = slab_automove_free,
+    .run = slab_automove_run
+};
+
+|-->start_lru_maintainer_thread //(items.c)
+	|-->lru_maintainer_thread //(items.c) 创建线程
+		|-->slab_automove_reg_t *sam = &slab_automove_default //
+			|-->sam->init //(items.c)
+				|-->slab_automove_init //(slab_automove.c)
+					|-->
+
+			|-->sam->run //(items.c)
+				|-->slab_automove_run //(slab_automove.c)
+					|-->
+
+|-->do_item_get //(items.c)
+	|-->if (is_flushed) //这个item是否在flush_all之前,如果是,则删除
+		|-->do_item_unlink //
+		|-->do_item_remove //
+
+	|-->else if(it->exptime != 0 && it->exptime <= current_time) //这个item是否过期,过期则删除
+		|-->do_item_unlink //
+		|-->do_item_remove //
+
+	|-->else //如果这个item没有在flush_all之前也没有过期,则标注为活跃item
+		|-->do_item_update //
+		
+
+|-->process_lru_command //(memcached.c)
+	|-->settings.hot_lru_pct = pct_hot;
+    |-->settings.warm_lru_pct = pct_warm;
+    |-->settings.hot_max_factor = hot_factor;
+    |-->settings.warm_max_factor = factor;
