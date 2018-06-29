@@ -185,8 +185,42 @@ settings.item_size_max > (settings.maxbytes / 2)
 			|-->worker_libevent //(thread.c)
 				|-->register_thread_initialized //()
 			
-
-	|-->init_lru_crawler //()
+	|-->start_assoc_maintenance_thread //(assoc.c) 默认开启该线程
+		|-->assoc_maintenance_thread //(assoc.c)
+			|-->pthread_cond_wait(&maintenance_cond, &maintenance_lock) //(assoc.c) 等待条件变量
+	
+	|-->start_item_crawler_thread //(crawler.c)  默认开启该线程
+		|-->item_crawler_thread //
+	
+	|-->start_slab_maintenance_thread //(slabs.c)
+		|-->pthread_cond_init(&slab_rebalance_cond, NULL) //初始化条件变量
+		|-->slab_rebalance_thread //(slabs.c)
+			|-->while (do_run_slab_rebalance_thread) //loop
+				|-->if (slab_rebalance_signal == 1)
+					|-->if (slab_rebalance_start() < 0)
+						|-->slab_rebalance_signal  = 1
+				
+					|-->was_busy = 0
+					
+				|-->else if (slab_rebalance_signal && slab_rebal.slab_start != NULL)
+					|-->was_busy = slab_rebalance_move
+						|-->
+						
+				|-->if (slab_rebal.done)
+					|-->slab_rebalance_finish //()
+					
+				|-->else if (was_busy)
+					|-->usleep(1000)
+					
+				|-->if (slab_rebalance_signal == 0)
+					|-->pthread_cond_wait(&slab_rebalance_cond, &slabs_rebalance_lock) //等待唤醒
+	
+	|-->start_conn_timeout_thread //()
+	
+	|-->clock_handler //(memcached.c)
+		|-->assoc_start_expand //(assoc.c)
+			|-->if (curr_items > (hashsize(hashpower) * 3) / 2 && hashpower < HASHPOWER_MAX)
+				|-->pthread_cond_signal(&maintenance_cond) //发送信号，唤醒assoc_maintenance_thread线程
 
 	|-->server_socket_unix //(memcached.c)
 		|-->conn_new //(memcached.c)
@@ -195,7 +229,21 @@ settings.item_size_max > (settings.maxbytes / 2)
 		|-->server_socket //(memcached.c)
 			|-->conn_new //(memcached.c)
 
-	|-->event_base_loop //()
+	|-->event_base_loop //(memcached.c) 阻塞在这里，具体实现参见libevent实现
+	
+	
+|-->stop_assoc_maintenance_thread //(assoc.c)
+	|-->do_run_maintenance_thread = 0 //设置while 循环退出变量值
+	|-->pthread_cond_signal(&maintenance_cond) //发送信号
+	
+|-->do_slabs_reassign //(slabs.c)
+	|-->slab_rebalance_signal = 1
+	|-->pthread_cond_signal(&slab_rebalance_cond) //发送信号
+	
+|-->stop_slab_maintenance_thread //(slabs.c)
+	|-->do_run_slab_thread = 0
+	|-->do_run_slab_rebalance_thread = 0
+	|-->pthread_cond_signal(&slab_rebalance_cond) //发送信号，以便唤醒线程并退出
 
 typedef struct {
     slab_automove_init_func init;
@@ -208,6 +256,10 @@ slab_automove_reg_t slab_automove_default = {
     .free = slab_automove_free,
     .run = slab_automove_run
 };
+
+|-->start_item_crawler_thread //(crawler.c)
+	|-->item_crawler_thread //(crawler.c)
+		|-->
 
 |-->start_lru_maintainer_thread //(items.c)
 	|-->lru_maintainer_thread //(items.c) 创建线程

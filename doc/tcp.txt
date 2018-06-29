@@ -317,7 +317,11 @@ i	|-->struct proto tcp_prot = {
 |-->tcp_v4_rcv //(tcp_ipv4.c) 数据包进入tcp的数据入口
 	|-->pskb_may_pull //(skbuff.h) 对数据包的头做一个校验，用tcp头的大小为基准进行判断
 	|-->skb_checksum_init //(skbuff.h) tcp数据校验
-	|-->__inet_lookup_skb //()
+	|-->__inet_lookup_skb //(inet_hashtables.h)
+		|-->__inet_lookup //(inet_hashtables.h)
+			|-->__inet_lookup_listener //(inet_hashtables.c)
+				|-->reuseport = sk->sk_reuseport //(inet_hashtables.c)
+				|-->reuseport_select_sock //(sock_reuseport.c) 选择socket的hash
 
 	|-->if (sk->sk_state == TCP_TIME_WAIT)当处于TIME_WAIT状态时直接进入别的分支
 		|-->xfrm4_policy_check //()
@@ -693,10 +697,15 @@ i	|-->struct proto tcp_prot = {
 						|-->inet_csk_delack_init //()
 						|-->sk->sk_prot->get_port //(inet_csk_get_port.c)
 							|-->inet_csk_get_port //(inet_connection_sock.c)
-								|-->
+								|-->判断SO_REUSEPORT
 
-						|-->sk_dst_reset //()
-						|-->sk->sk_prot->hash //()
+						|-->sk_dst_reset //(inet_connection_sock.c)
+						|-->sk->sk_prot->hash //(inet_connection_sock.c)
+							|-->inet_hash //(inet_hashtables.c)
+								|-->__inet_hash //(inet_hashtables.c)
+									|-->inet_reuseport_add_sock //(inet_hashtables.c)
+										|-->reuseport_add_sock //(sock_reuseport.c)
+									
 
 					|-->sk->sk_max_ack_backlog = backlog; //
 
@@ -773,3 +782,8 @@ adjudge_to_death:
 				
 |-->tcp_v4_connect
 	|-->tcp_death_row.sysctl_tw_recycle //对应/proc/sys/net/ipv4/tcp_tw_recycle
+	
+
+|-->inet_hash //(inet_hashtables.c)
+	|-->__inet_hash //(inet_hashtables.c)
+		|-->inet_reuseport_add_sock //(inet_hashtables.c)
