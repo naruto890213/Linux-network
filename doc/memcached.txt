@@ -14,6 +14,100 @@ typedef struct {
     size_t requested; /* The number of requested bytes */
 } slabclass_t; //(slabs.c)
 
+|-->struct conn //(memcached.h) 每个接入memcached数据库的用户数据结构体
+	|-->struct conn {
+	    int    sfd;
+	    sasl_conn_t *sasl_conn;
+	    bool authenticated;
+	    enum conn_states  state;
+	    enum bin_substates substate;
+	    rel_time_t last_cmd_time;
+	    struct event event;
+	    short  ev_flags;
+	    short  which;   /** which events were just triggered */
+	
+	    char   *rbuf;   /** buffer to read commands into */
+	    char   *rcurr;  /** but if we parsed some already, this is where we stopped */
+	    int    rsize;   /** total allocated size of rbuf */
+	    int    rbytes;  /** how much data, starting from rcur, do we have unparsed */
+	
+	    char   *wbuf;
+	    char   *wcurr;
+	    int    wsize;
+	    int    wbytes;
+	    /** which state to go into after finishing current write */
+	    enum conn_states  write_and_go;
+	    void   *write_and_free; /** free this memory after finishing writing */
+	
+	    char   *ritem;  /** when we read in an item's value, it goes here */
+		int    rlbytes;
+	
+	    /* data for the nread state */
+	
+	    /**
+	     * item is used to hold an item structure created after reading the command
+	     * line of set/add/replace commands, but before we finished reading the actual
+	     * data. The data is read into ITEM_data(item) to avoid extra copying.
+	     */
+	
+	    void   *item;     /* for commands set/add/replace  */
+	
+	    /* data for the swallow state */
+	    int    sbytes;    /* how many bytes to swallow */
+	
+	    /* data for the mwrite state */
+	    struct iovec *iov;
+	    int    iovsize;   /* number of elements allocated in iov[] */
+	    int    iovused;   /* number of elements used in iov[] */
+	
+	    struct msghdr *msglist;
+	    int    msgsize;   /* number of elements allocated in msglist[] */
+	    int    msgused;   /* number of elements used in msglist[] */
+	    int    msgcurr;   /* element in msglist[] being transmitted now */
+		item   **ilist;   /* list of items to write out */
+	    int    isize;
+	    item   **icurr;
+	    int    ileft;
+	
+	    char   **suffixlist;
+	    int    suffixsize;
+	    char   **suffixcurr;
+	    int    suffixleft;
+	#ifdef EXTSTORE
+	    int io_wrapleft;
+	    unsigned int recache_counter;
+	    io_wrap *io_wraplist; /* linked list of io_wraps */
+	    bool io_queued; /* FIXME: debugging flag */
+	#endif
+	    enum protocol protocol;   /* which protocol this connection speaks */
+	    enum network_transport transport; /* what transport is used by this connection */
+	
+	    /* data for UDP clients */
+	    int    request_id; /* Incoming UDP request ID, if this is a UDP "connection" */
+	    struct sockaddr_in6 request_addr; /* udp: Who sent the most recent request */
+	    socklen_t request_addr_size;
+	    unsigned char *hdrbuf; /* udp packet headers */
+	    int    hdrsize;   /* number of headers' worth of space is allocated */
+	
+	    bool   noreply;   /* True if the reply should not be sent. */
+		/* current stats command */
+	    struct {
+	        char *buffer;
+	        size_t size;
+	        size_t offset;
+	    } stats;
+	
+	    /* Binary protocol stuff */
+	    /* This is where the binary header goes */
+	    protocol_binary_request_header binary_header;
+	    uint64_t cas; /* the cas to return */
+	    short cmd; /* current command being processed */
+	    int opaque;
+	    int keylen;
+	    conn   *next;     /* Used for generating a list of conn structures */
+	    LIBEVENT_THREAD *thread; /* Pointer to the thread object serving this connection */
+	};
+
 #define MAX_NUMBER_OF_SLAB_CLASSES (63 + 1) //(memcached.h)
 static slabclass_t slabclass[MAX_NUMBER_OF_SLAB_CLASSES] //(slabs.c) 全局变量
 
@@ -42,6 +136,9 @@ settings.item_size_max > (settings.maxbytes / 2)
 		|-->settings.hot_max_factor = 0.2
 		|-->settings.warm_max_factor = 2.0
 		|-->settings.temp_lru = false
+		|-->settings.idle_timeout = 0;
+		|-->settings.inter = NULL //
+		|-->settings.port = 11211 //
 		
 	|-->init_lru_maintainer //(items.c) 初始化互斥锁和全局变量
 		|-->pthread_mutex_init(&lru_maintainer_lock, NULL) 
@@ -55,166 +152,149 @@ settings.item_size_max > (settings.maxbytes / 2)
 	|-->slabs_init(settings.maxbytes, settings.factor, preallocate, use_slab_sizes ? slab_sizes : NULL) //(slabs.c)
 		|-->
 		
-	|-->if (settings.socketpath == NULL) //默认进入该分支
-		|-->server_sockets //(memcached.c) 创建listen socket
-			|-->server_socket //(memcached.c)
-				|-->new_socket //(memcached.c) 创建socket并将之设置为O_NONBLOCK
-				|-->setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (void *)&flags, sizeof(flags)) 
-				|-->setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flags, sizeof(flags))
-				|-->setsockopt(sfd, SOL_SOCKET, SO_LINGER, (void *)&ling, sizeof(ling))
-				|-->setsockopt(sfd, IPPROTO_TCP, TCP_NODELAY, (void *)&flags, sizeof(flags))
-				|-->conn_new //()
-					|-->event_set(&c->event, sfd, event_flags, event_handler, (void *)c) //将创建的listen句柄绑定到event_handler函数
-						|-->event_handler //(memcached.c) 当listener接收到数据时会调用到该函数
-							|-->drive_machine //(memcached.c)
-								|-->switch(c->state)
-									|-->case conn_listening //监听状态，用于处理新接入的用户请求
-										|-->accept
-										|-->dispatch_conn_new //(thread.c)
-											|-->item->init_state = conn_new_cmd //将状态机设置为conn_new_cmd，等待用户输入命令
-											|-->item->mode = queue_new_conn //(threads.c) 设置mode状态机
-											|-->write //通过 notify_send_fd 向pipe中写入一个字节'c'来通知对应的线程(pipe中不是原子的，所以写入一个字节确保不会出现数据紊乱)
-	
-	
 	|-->memcached_thread_init //(thread.c)
 		|-->pipe(fds) //创建管道用于通信
 		|-->threads[i].notify_receive_fd = fds[0] 
 		|-->threads[i].notify_send_fd = fds[1] 
 		|-->setup_thread //(thread.c)
-			|-->event_set(&me->notify_event, me->notify_receive_fd, EV_READ | EV_PERSIST, thread_libevent_process, me)//将notify_receive_fd绑定到thread_libevent_process
+			|-->event_set(&me->notify_event, me->notify_receive_fd, EV_READ | EV_PERSIST, thread_libevent_process, me)//将notify_receive_fd绑定到thread_libevent_process, 该线程为工作线程,执行真正的数据解析
 			|-->thread_libevent_process //(thread.c)
 				|-->switch(switch (buf[0]))
-					|-->case 'c': //
-						|-->conn_new //(memcached.c)
-							|-->event_handler //(memcached.c)
-								|-->drive_machine //(memcached.c)
-									|-->switch(c->state)
-										|-->conn_new_cmd //
-											|-->--nreqs //
-											|-->if (nreqs >= 0)
-												|-->reset_cmd_handler //(memcached.c)
-													|-->conn_shrink(c) //(memcached.c) 调整内存
-													|-->if (c->rbytes > 0)
-														|-->conn_set_state(c, conn_parse_cmd) //正常情况下进入该状态,再次进入while循环
-													|-->else
-														|-->conn_set_state(c, conn_waiting)
-											|-->else //(nreqs < 0)
-												|-->stop = true //退出while循环
-												
-										|-->conn_read //从fd中读取数据
-											|-->res = try_read_network(c) //(memcached.c)
-												|-->res = read //读取数据
-													|-->if(res > 0)
-														|-->c->thread->stats.bytes_read += res //前后加锁
-										
-													|-->if (res == 0)
-														|-->return READ_ERROR
-														
-													|-->if (res == -1)
-														|-->if (errno == EAGAIN || errno == EWOULDBLOCK)
-															|-->break;
+					|-->case 'c': //由另外一个pipe唤醒
+						|-->item = cq_pop(me->new_conn_queue) //获取当前的item
+						|-->switch (item->mode) //根据mode来分类执行, listen后会将其置为queue_new_conn
+							|-->case queue_new_conn //listen后会将其置为queue_new_conn
+								|-->conn_new //(memcached.c)
+									|-->event_set(&c->event, sfd, event_flags, event_handler, (void *)c)// 设置回调函数
+										|-->event_handler //(memcached.c)
+											|-->drive_machine //(memcached.c)
+												|-->switch(c->state)
+													|-->conn_new_cmd //
+														|-->--nreqs //
+														|-->if (nreqs >= 0)
+															|-->reset_cmd_handler //(memcached.c)
+																|-->conn_shrink(c) //(memcached.c) 调整内存
+																|-->if (c->rbytes > 0)
+																	|-->conn_set_state(c, conn_parse_cmd) //正常情况下进入该状态,再次进入while循环
+																|-->else
+																	|-->conn_set_state(c, conn_waiting)
+														|-->else //(nreqs < 0)
+															|-->stop = true //退出while循环
 															
-														|-->return READ_ERROR;
-														
-											|-->switch (res)
-												|-->case READ_NO_DATA_RECEIVED //无数据接收
-													|-->conn_set_state(c, conn_waiting) //设置为继续等待
+													|-->conn_read //从fd中读取数据
+														|-->res = try_read_network(c) //(memcached.c)
+															|-->res = read //读取数据
+																|-->if(res > 0)
+																	|-->c->thread->stats.bytes_read += res //前后加锁
 													
-												|-->READ_DATA_RECEIVED //有数据接收
-													|-->conn_set_state(c, conn_parse_cmd) //
-												
-												|-->case READ_ERROR //读取失败
-													|-->conn_set_state(c, conn_closing) //设置状态机为conn_closing，再次进入loop
+																|-->if (res == 0)
+																	|-->return READ_ERROR
+																	
+																|-->if (res == -1)
+																	|-->if (errno == EAGAIN || errno == EWOULDBLOCK)
+																		|-->break;
+																		
+																	|-->return READ_ERROR;
+																	
+														|-->switch (res)
+															|-->case READ_NO_DATA_RECEIVED //无数据接收
+																|-->conn_set_state(c, conn_waiting) //设置为继续等待
+																
+															|-->READ_DATA_RECEIVED //有数据接收
+																|-->conn_set_state(c, conn_parse_cmd) //
+															
+															|-->case READ_ERROR //读取失败
+																|-->conn_set_state(c, conn_closing) //设置状态机为conn_closing，再次进入loop
+																
+													|-->conn_closing //处理关闭连接
+														|-->if (IS_UDP(c->transport))
+															|-->conn_cleanup(c)
+														|-->else
+															|-->conn_close //tcp处理方式，最终会调用epoll_ctl将fd删除
+																|-->event_del(&c->event) //调用epoll删除fd
+																|-->conn_cleanup //
+																
+														|-->stop = true //退出loop循环
 													
-										|-->conn_closing //处理关闭连接
-											|-->if (IS_UDP(c->transport))
-												|-->conn_cleanup(c)
-											|-->else
-												|-->conn_close //tcp处理方式，最终会调用epoll_ctl将fd删除
-													|-->event_del(&c->event) //调用epoll删除fd
-													|-->conn_cleanup //
-													
-											|-->stop = true //退出loop循环
-										
-										|-->case conn_parse_cmd //处理用户输入的指令
-											|-->ret = try_read_command //(memcached.c) 读取指令
-												|-->process_command //(memcached.c)
-													|-->add_msghdr //(memcached.c)
-														|-->
+													|-->case conn_parse_cmd //处理用户输入的指令
+														|-->ret = try_read_command //(memcached.c) 读取指令
+															|-->process_command //(memcached.c)
+																|-->add_msghdr //(memcached.c)
+																	|-->
 
-													|-->tokenize_command //(memcached.c)
-														|-->
+																|-->tokenize_command //(memcached.c)
+																	|-->
 
-													|-->switch(cmd)
-														|-->case "get" || "bget"
-															|-->process_get_command //()
+																|-->switch(cmd)
+																	|-->case "get" || "bget"
+																		|-->process_get_command //()
 
-														|-->case "add" || "set" || "replace" || "prepend" || "append"
-															|-->process_update_command(c, tokens, ntokens, comm, false)
-																|-->set_noreply_maybe //()
-																|-->判断key值的长度(不能大于250),否则返回错误
-																|-->item_alloc //(thread.c)
-																	|-->do_item_alloc //(items.c) 惰性分配
-																		|-->item_make_header //(items.c) 计算数据存储长度
-																		|-->slabs_clsid //(slabs.c)
-																			|-->通过while对比slabclass.size的大小,从而返回对应的索引值(slabclass.szie在slabs_init中预分配)
-																		|-->判断种大小是否超过settings.slab_chunk_size_max(该值默认为512K)
-																			|-->超过
-																				|-->
-
-																			|-->不超过
-																				|-->do_item_alloc_pull //(items.c)
-																					|-->slabs_alloc //(slabs.c)
-																						|-->do_slabs_alloc //(slabs.c)
+																	|-->case "add" || "set" || "replace" || "prepend" || "append"
+																		|-->process_update_command(c, tokens, ntokens, comm, false)
+																			|-->set_noreply_maybe //()
+																			|-->判断key值的长度(不能大于250),否则返回错误
+																			|-->item_alloc //(thread.c)
+																				|-->do_item_alloc //(items.c) 惰性分配
+																					|-->item_make_header //(items.c) 计算数据存储长度
+																					|-->slabs_clsid //(slabs.c)
+																						|-->通过while对比slabclass.size的大小,从而返回对应的索引值(slabclass.szie在slabs_init中预分配)
+																					|-->判断种大小是否超过settings.slab_chunk_size_max(该值默认为512K)
+																						|-->超过
 																							|-->
 
-																|-->
-																|-->conn_set_state(c, conn_nread) //设置状态机
+																						|-->不超过
+																							|-->do_item_alloc_pull //(items.c)
+																								|-->slabs_alloc //(slabs.c)
+																									|-->do_slabs_alloc //(slabs.c)
+																										|-->
 
-														|-->case "cas"
-															|-->process_update_command(c, tokens, ntokens, comm, true)
+																			|-->
+																			|-->conn_set_state(c, conn_nread) //设置状态机
 
-														|-->case "inc"
-															|-->process_arithmetic_command//
+																	|-->case "cas"
+																		|-->process_update_command(c, tokens, ntokens, comm, true)
 
-														|-->case "gets"
-															|-->process_get_command //()
+																	|-->case "inc"
+																		|-->process_arithmetic_command//
 
-														|-->case "decr"
-															|-->process_arithmetic_command //()
+																	|-->case "gets"
+																		|-->process_get_command //()
 
-														|-->case "delete"
-															|-->process_delete_command //()
+																	|-->case "decr"
+																		|-->process_arithmetic_command //()
 
-														|-->case "touch"
-															|-->process_touch_command //()
+																	|-->case "delete"
+																		|-->process_delete_command //()
 
-														|-->case "gat"
-															|-->process_get_command(c, tokens, ntokens, false, true) //
+																	|-->case "touch"
+																		|-->process_touch_command //()
 
-														|-->case "gats"
-															|-->process_get_command(c, tokens, ntokens, true, true) //
+																	|-->case "gat"
+																		|-->process_get_command(c, tokens, ntokens, false, true) //
 
-														|-->case "stats"
-															|-->process_stat //()
+																	|-->case "gats"
+																		|-->process_get_command(c, tokens, ntokens, true, true) //
 
-														|-->case "flush_all"
-															|-->
+																	|-->case "stats"
+																		|-->process_stat //()
 
-														|-->case "version"
-															|-->out_string //
+																	|-->case "flush_all"
+																		|-->
 
-														|-->case "quit"
-															|-->conn_set_state(c, conn_closing) //
+																	|-->case "version"
+																		|-->out_string //
 
-														|-->case "shutdown"
-															|-->
+																	|-->case "quit"
+																		|-->conn_set_state(c, conn_closing) //
 
-														|-->case "slabs"
-															|-->
-												
-											|-->if(0 == ret)
-												|-->conn_set_state(c, conn_waiting) //将状态置为waiting状态
+																	|-->case "shutdown"
+																		|-->
+
+																	|-->case "slabs"
+																		|-->
+															
+														|-->if(0 == ret)
+															|-->conn_set_state(c, conn_waiting) //将状态置为waiting状态
 
 		|-->create_worker(worker_libevent, &threads[i]) //(thread.c)
 			|-->worker_libevent //(thread.c)
@@ -250,19 +330,59 @@ settings.item_size_max > (settings.maxbytes / 2)
 				|-->if (slab_rebalance_signal == 0)
 					|-->pthread_cond_wait(&slab_rebalance_cond, &slabs_rebalance_lock) //等待唤醒
 	
-	|-->start_conn_timeout_thread //()
+	|-->if(settings.idle_timeout)//默认为0,不进入该分支
+		|-->start_conn_timeout_thread //(memcached.c)
+			|-->conn_timeout_thread //(memcached.c)
+				|-->while(1) //loop
+					|-->oldest_last_cmd = current_time //
+					|-->for (i = 0; i < max_fds; i++)
+						|-->if (c->state == conn_new_cmd || c->state == conn_read)
+							|-->if ((current_time - c->last_cmd_time) > settings.idle_timeout)
+								|-->buf[0] = 't'
+								|-->memcpy(&buf[1], &i, sizeof(int)) 
+								|-->write(c->thread->notify_send_fd, buf, TIMEOUT_MSG_SIZE) //写入数据
+
+						|-->usleep //睡眠
 	
 	|-->clock_handler //(memcached.c)
 		|-->assoc_start_expand //(assoc.c)
 			|-->if (curr_items > (hashsize(hashpower) * 3) / 2 && hashpower < HASHPOWER_MAX)
 				|-->pthread_cond_signal(&maintenance_cond) //发送信号，唤醒assoc_maintenance_thread线程
 
-	|-->server_socket_unix //(memcached.c)
-		|-->conn_new //(memcached.c)
-
-	|-->server_sockets //(memcached.c)
-		|-->server_socket //(memcached.c)
+	|-->if (settings.socketpath != NULL)//默认settings.socketpath=NULL,所以不会进入该分支 
+		|-->server_socket_unix //(memcached.c)
 			|-->conn_new //(memcached.c)
+
+	|-->if (settings.socketpath == NULL) //默认进入该分支
+		|-->if(settings.port) //默认为11211
+			|-->server_sockets(settings.port, tcp_transport, portnumber_file) //(memcached.c) 默认创建tcp
+				|-->if (settings.inter == NULL) 默认进入该分支
+					|-->server_socket //(memcached.c)
+						|-->new_socket //(memcached.c) 创建socket并将之设置为O_NONBLOCK
+						|-->setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (void *)&flags, sizeof(flags)) 
+						|-->setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flags, sizeof(flags))
+						|-->setsockopt(sfd, SOL_SOCKET, SO_LINGER, (void *)&ling, sizeof(ling))
+						|-->setsockopt(sfd, IPPROTO_TCP, TCP_NODELAY, (void *)&flags, sizeof(flags))
+						|-->bind, listen
+						|-->listen_conn_add = conn_new(sfd, conn_listening, EV_READ | EV_PERSIST, 1, transport, main_base) //(memcached.c)
+							|-->c->state = conn_listening //将状态机设置为conn_listening
+							|-->event_set(&c->event, sfd, event_flags, event_handler, (void *)c) //将创建的listen句柄绑定到event_handler函数, 当有新的连接到来时调用该函数
+								|-->event_handler //(memcached.c) 当listener接收到数据时会调用到该函数
+									|-->drive_machine //(memcached.c)
+										|-->switch(c->state)
+											|-->case conn_listening //监听状态，用于处理新接入的用户请求
+												|-->sfd = accept //新连接的fd
+												|-->dispatch_conn_new(sfd, conn_new_cmd, EV_READ | EV_PERSIST, DATA_BUFFER_SIZE, c->transport) //(thread.c) 设置新连接的fd状态为conn_new_cmd, listen状态的fd状态保持不变
+													|-->item->init_state = conn_new_cmd //将状态机设置为conn_new_cmd，等待用户输入命令
+													|-->item->mode = queue_new_conn //(threads.c) 设置mode状态机
+													|-->buf[0] = 'c' 
+													|-->write(thread->notify_send_fd, buf, 1) //通过 notify_send_fd 向pipe中写入一个字节'c'来切换到子线程(pipe中不是原子的，所以写入一个字节确保不会出现数据紊乱)
+
+							|-->event_base_set(base, &c->event)
+
+				|-->else //如果设置了settings.inter则进入该分支
+					|-->server_socket //解析数据结构,创建更多的server_socket
+	
 
 	|-->event_base_loop //(memcached.c) 阻塞在这里，具体实现参见libevent实现
 	
