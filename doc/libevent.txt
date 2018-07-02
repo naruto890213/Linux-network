@@ -351,3 +351,21 @@ static const struct eventop *eventops[] = {
 								
 							|-->case EV_CLOSURE_EVENT:
 								|-->(*ev->ev_callback)(ev->ev_fd, ev->ev_res, ev->ev_arg)
+								
+								
+								
+|-->event_del //(event.c)
+	|-->event_del_(ev, EVENT_DEL_AUTOBLOCK) //(event.c)
+		|-->event_del_nolock_ //(event.c)
+			|-->if (ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED))
+				|-->evmap_io_del_ //(evmap.c)
+					|-->evsel->del //(evmap.c)
+						|-->epoll_nochangelist_del //(epoll.c)
+							|-->epoll_apply_one_change //(epoll.c)
+								|-->op = epoll_op_table[idx].op
+								|-->epoll_ctl(epollop->epfd, op, ch->fd, &epev) //(epoll.c)
+				
+			|-->else
+				|-->evmap_signal_del_ //()
+			
+			

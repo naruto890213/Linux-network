@@ -100,7 +100,42 @@ settings.item_size_max > (settings.maxbytes / 2)
 														|-->conn_set_state(c, conn_waiting)
 											|-->else //(nreqs < 0)
 												|-->stop = true //退出while循环
-											
+												
+										|-->conn_read //从fd中读取数据
+											|-->res = try_read_network(c) //(memcached.c)
+												|-->res = read //读取数据
+													|-->if(res > 0)
+														|-->c->thread->stats.bytes_read += res //前后加锁
+										
+													|-->if (res == 0)
+														|-->return READ_ERROR
+														
+													|-->if (res == -1)
+														|-->if (errno == EAGAIN || errno == EWOULDBLOCK)
+															|-->break;
+															
+														|-->return READ_ERROR;
+														
+											|-->switch (res)
+												|-->case READ_NO_DATA_RECEIVED //无数据接收
+													|-->conn_set_state(c, conn_waiting) //设置为继续等待
+													
+												|-->READ_DATA_RECEIVED //有数据接收
+													|-->conn_set_state(c, conn_parse_cmd) //
+												
+												|-->case READ_ERROR //读取失败
+													|-->conn_set_state(c, conn_closing) //设置状态机为conn_closing，再次进入loop
+													
+										|-->conn_closing //处理关闭连接
+											|-->if (IS_UDP(c->transport))
+												|-->conn_cleanup(c)
+											|-->else
+												|-->conn_close //tcp处理方式，最终会调用epoll_ctl将fd删除
+													|-->event_del(&c->event) //调用epoll删除fd
+													|-->conn_cleanup //
+													
+											|-->stop = true //退出loop循环
+										
 										|-->case conn_parse_cmd //处理用户输入的指令
 											|-->ret = try_read_command //(memcached.c) 读取指令
 												|-->process_command //(memcached.c)
@@ -290,3 +325,7 @@ slab_automove_reg_t slab_automove_default = {
     |-->settings.warm_lru_pct = pct_warm;
     |-->settings.hot_max_factor = hot_factor;
     |-->settings.warm_max_factor = factor;
+
+|-->conn_close //(memcached.c)
+	|-->event_del(&c->event) //调用epoll删除fd
+	|-->conn_cleanup //
