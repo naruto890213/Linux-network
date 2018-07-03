@@ -224,7 +224,7 @@ settings.item_size_max > (settings.maxbytes / 2)
 																		|-->conn_set_state(c, conn_waiting) //设置为继续等待
 																		
 																	|-->READ_DATA_RECEIVED //有数据接收
-																		|-->conn_set_state(c, conn_parse_cmd) //
+																		|-->conn_set_state(c, conn_parse_cmd) //正常情况下会进入该状态, 直接进入下一个loop, 到conn_parse_cmd
 																	
 																	|-->case READ_ERROR //读取失败
 																		|-->conn_set_state(c, conn_closing) //设置状态机为conn_closing，再次进入loop
@@ -239,7 +239,7 @@ settings.item_size_max > (settings.maxbytes / 2)
 																		
 																|-->stop = true //退出loop循环
 															
-															|-->case conn_parse_cmd //处理用户输入的指令
+															|-->case conn_parse_cmd // conn_read状态到该状态, 处理用户输入的指令
 																|-->ret = try_read_command //(memcached.c) 读取指令
 																	|-->process_command //(memcached.c)
 																		|-->add_msghdr //(memcached.c)
@@ -337,11 +337,28 @@ settings.item_size_max > (settings.maxbytes / 2)
 	if(start_assoc_maint) //默认进入该分支
 		|-->start_assoc_maintenance_thread //(assoc.c) 默认开启该线程
 			|-->assoc_maintenance_thread //(assoc.c)
-				|-->pthread_cond_wait(&maintenance_cond, &maintenance_lock) //(assoc.c) 等待条件变量
+				|-->while (do_run_maintenance_thread) //进入loop循环,do_run_maintenance_thread初始化为1
+					|-->for (ii = 0; ii < hash_bulk_move && expanding; ++ii) //初始状态时无法进入,expanding=false
+						|-->
+
+					|-->if (!expanding) //初始状态expanding=false, 进入该状态
+						|-->started_expanding = false
+						|-->pthread_cond_wait(&maintenance_cond, &maintenance_lock) //(assoc.c) 等待条件变量, 将在clock_handler函数中被唤醒
+						|-->assoc_expand //(assoc.c)
+							|-->calloc //分配内存
+							|-->expanding = true
+
 	
 	if(start_lru_crawler) //默认进入该分支
 		|-->start_item_crawler_thread //(crawler.c)  默认开启该线程
-			|-->item_crawler_thread //
+			|-->do_run_lru_crawler_thread = 1 //设置变量
+			|-->item_crawler_thread //(crawler.c)创建线程
+				|-->pthread_cond_signal(&lru_crawler_cond) //发送条件变量,告知父线程,已经创建成功
+				|-->settings.lru_crawler = true //
+				|-->while (do_run_lru_crawler_thread) //进入loop 循环
+					|-->pthread_cond_wait(&lru_crawler_cond, &lru_crawler_lock) //等待条件变量
+
+			|-->pthread_cond_wait(&lru_crawler_cond, &lru_crawler_lock) //等待条件变量,否则阻塞在这里
 	
 	if(settings.slab_reassign) //默认进入该分支
 		|-->start_slab_maintenance_thread //(slabs.c)
@@ -369,8 +386,19 @@ settings.item_size_max > (settings.maxbytes / 2)
 	
 	if(start_lru_maintainer)//默认进入该分支
 		|-->start_lru_maintainer_thread //(memcached.c)
+			|-->do_run_lru_maintainer_thread = 1 //设置变量,用于线程loop
 			|-->settings.lru_maintainer_thread = true
 			|-->lru_maintainer_thread //(items.c) 创建线程
+				|-->while (do_run_lru_maintainer_thread) //进入loop循环
+					|-->if (settings.lru_crawler && last_crawler_check != current_time)
+						|-->lru_maintainer_crawler_check(cdata, l)//(items.c)
+							|-->if (do_run)
+								|-->lru_crawler_start //(crawler.c)
+									|-->if(stats)
+										|-->pthread_cond_signal(&lru_crawler_cond) //将slab_maintenance_thread唤醒
+
+						|-->last_crawler_check = current_time
+
 				|-->slab_automove_reg_t *sam = &slab_automove_default //
 					|-->sam->init //(items.c)
 						|-->slab_automove_init //(slab_automove.c)
