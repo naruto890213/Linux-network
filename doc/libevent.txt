@@ -235,6 +235,32 @@ static const struct eventop *eventops[] = {
 		|-->base->evbase = base->evsel->init(base)
 			|-->epoll_init //(epoll.c)
 				|-->evsig_init_ //(signal.c)
+					|-->evutil_make_internal_pipe_(base->sig.ev_signal_pair) //对ev_signal_pair创建pipe
+					|-->event_assign(&base->sig.ev_signal, base, base->sig.ev_signal_pair[0], EV_READ | EV_PERSIST, evsig_cb, base) //绑定ev_signal_pair[0]
+						|-->evsig_cb //(signal.c) ev_signal_pair[0]的回调函数
+							|-->while (1) //loop
+								|-->n = read(fd, signals, sizeof(signals)) //接收数据
+								|-->switch(n) //根据接收到的数据长度进行分支处理
+									|-->case -1: //接收错误
+										|-->evutil_socket_geterror //获取错误码类型
+										
+									|-->case 0: //对方已经关闭
+										|-->不做处理
+										
+									|-->default: //正常接收到数据
+										|-->for (i = 0; i < n; ++i)
+											|-->sig = signals[i]
+											|-->if (sig < NSIG) //检查当前的sig是否有效，如果有效将其加入到对应的数组中，并增加该数组的数值
+												|-->ncaught[sig]++ 
+												
+								|-->for (i = 0; i < NSIG; ++i) //根据不同的signum进行轮训检查
+									|-->if (ncaught[i]) //如果当前的信号上有队列则执行该信号
+										|-->evmap_signal_active_(base, i, ncaught[i]) //(evmap.c) 执行当前的信号
+											|-->event_active_nolock_ //(event.c)
+												|-->event_callback_activate_nolock_ //(event.c)
+													|-->event_queue_insert_active //(event.c)
+														|-->
+						
 					|-->base->evsigsel = &evsigops
 				
 		|-->event_base_priority_init(base, 1) //(event.c)
@@ -321,11 +347,7 @@ static const struct eventop *eventops[] = {
 			|-->else
 				|-->ev->ev_closure = EV_CLOSURE_EVENT
 
-
-|-->epoll_nochangelist_add //(epoll.c)
-	|-->epoll_apply_changes //(epoll.c)
-		|-->epoll_apply_one_change //(epoll.c)
-
+				
 |-->event_loop //(event.c)
 	|-->event_base_loop //(event.c)
 		|-->loop
@@ -352,12 +374,37 @@ static const struct eventop *eventops[] = {
 							|-->case EV_CLOSURE_EVENT:
 								|-->(*ev->ev_callback)(ev->ev_fd, ev->ev_res, ev->ev_arg)
 								
+
+|-->event_add //(event.c)
+	|-->event_add_nolock_ //(event.c)
+		|-->if (ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED))
+			|-->evmap_io_add_ //(evmap.c)
+				|-->evsel->add //(evmap.c)
+					|-->epoll_nochangelist_add //(epoll.c)
+						|-->epoll_apply_one_change //(epoll.c)
+							|-->epoll_ctl //
+			
+		|-->else if (ev->ev_events & EV_SIGNAL)
+			|-->evmap_signal_add_ //(evmap.c)
+				|-->evsel = base->evsigsel //(evmap.c)
+				|-->evsel->add //(evmap.c) 实际调用singal的函数
+					|-->evsig_add //(signal.c)
+						|-->evsig_base_fd = base->sig.ev_signal_pair[1] //给全局变量evsig_base_fd赋值
+						|-->evsig_set_handler_(base, (int)evsignal, evsig_handler) //(signal.c)
+							|-->分2种情况
+								|-->如果支持sigaction，则将信号加入到sigaction等待信号的执行
+								|-->否则直接使用singal将信号加入到等待队列中
 								
+							|-->evsig_handler //当信号到来时调用该函数
+								|-->signal 发送信号
+								|-->msg = sig
+								|-->write(evsig_base_fd, (char*)&msg, 1) //使用evsig_base_fd发送一个信号
+				
 								
 |-->event_del //(event.c)
 	|-->event_del_(ev, EVENT_DEL_AUTOBLOCK) //(event.c)
 		|-->event_del_nolock_ //(event.c)
-			|-->if (ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED))
+			|-->if (ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED)) //io操作时进入该分支
 				|-->evmap_io_del_ //(evmap.c)
 					|-->evsel->del //(evmap.c)
 						|-->epoll_nochangelist_del //(epoll.c)
@@ -365,7 +412,13 @@ static const struct eventop *eventops[] = {
 								|-->op = epoll_op_table[idx].op
 								|-->epoll_ctl(epollop->epfd, op, ch->fd, &epev) //(epoll.c)
 				
-			|-->else
-				|-->evmap_signal_del_ //()
+			|-->else //如果为signal则进入该分支
+				|-->evmap_signal_del_ //(evmap.c)
+					|-->evsel = base->evsigsel //(evmap.c)
+					|-->evsel->del //(evmap.c) 实际调用singal的函数
+						|-->evsig_del //()
 			
+
+|-->event_base_set //(event.c)
+	|-->ev->ev_base = base //将event_base和event关联起来
 			
