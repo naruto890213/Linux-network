@@ -159,7 +159,10 @@ settings.item_size_max > (settings.maxbytes / 2)
 	|-->assoc_init //()
 	|-->conn_init //()
 	|-->slabs_init(settings.maxbytes, settings.factor, preallocate, use_slab_sizes ? slab_sizes : NULL) //(slabs.c)
-		|-->
+		|-->memset(slabclass, 0, sizeof(slabclass)) //清空全局变量slabclass, 为64数组的结构体
+        |-->while (++i < MAX_NUMBER_OF_SLAB_CLASSES-1) //对slabclass数组进行赋值
+            |-->slabclass[i].size = size
+            |-->slabclass[i].perslab = settings.slab_page_size / slabclass[i].size
 		
 	|-->memcached_thread_init //(thread.c)
 		|-->pipe(fds) //创建管道用于通信
@@ -397,8 +400,46 @@ settings.item_size_max > (settings.maxbytes / 2)
 			|-->settings.lru_maintainer_thread = true
 			|-->lru_maintainer_thread //(items.c) 创建线程
 				|-->while (do_run_lru_maintainer_thread) //进入loop循环
+					|-->last_sleep = to_sleep > 1000 ? to_sleep : 1000 //to_sleep初始值为1000
+					|-->to_sleep = MAX_LRU_MAINTAINER_SLEEP //重新赋值
+					|-->stats.lru_maintainer_juggles++ //
+					|-->for (i = POWER_SMALLEST; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) //MAX_NUMBER_OF_SLAB_CLASSES=64
+						|-->did_moves = lru_maintainer_juggle(i) //(items.c)
+							|-->slabs_available_chunks //(slabs.c)
+								|-->p = &slabclass[id] //根据id获取slab全局变量的数据
+								|-->return p->sl_curr //当前list中剩余可用的item数量
+							|-->if (settings.temp_lru) //该值默认为false
+								|-->total_bytes -= temp_lru_size(slabs_clsid)
+							|-->if (settings.lru_segmented) //该值默认为true
+								|-->if (tails[slabs_clsid|COLD_LRU]) //如果最后面的item在cold链表中
+									|-->cold_age = current_time - tails[slabs_clsid|COLD_LRU]->time
+
+								|-->hot_age = cold_age * settings.hot_max_factor
+								|-->warm_age = cold_age * settings.warm_max_factor
+
+							|-->for (i = 0; i < 500; i++)
+								|-->lru_pull_tail //分别检查clod, warm, hot list中符合要求的个数
+
+					|-->if (settings.lru_segmented )默认为true
+						|-->lru_maintainer_bumps //(items.c)
+							|-->(lru_bump_entry *) bipbuf_peek_all(b->buf, &size) //
+								|-->*size = me->a_end - me->a_start //对size进行赋值
+
+							|-->while (size)
+								|-->do_item_update //
+								|-->do_item_remove //
+								|-->size -= sizeof(lru_bump_entry)
+
+							|-->bipbuf_poll(b->buf, size) //(bipbuffer.c)
+								|-->__check_for_switch_to_b //(bipbuffer.c)
+
 					|-->if (settings.lru_crawler && last_crawler_check != current_time)
 						|-->lru_maintainer_crawler_check(cdata, l)//(items.c)
+							|-->do_run = false
+							|-->for (i = POWER_SMALLEST; i < POWER_LARGEST; i++) //进入loop寻轮
+								|-->if (current_time > next_crawls[i])
+									|-->do_run = true
+
 							|-->if (do_run)
 								|-->lru_crawler_start //(crawler.c)
 									|-->if(stats)
