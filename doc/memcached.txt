@@ -147,7 +147,14 @@ settings.item_size_max > (settings.maxbytes / 2)
 		|-->lru_maintainer_initialized = 1 
 	
 	|-->event_init //调用libevent库，创建事件
-	|-->logger_init //()
+	|-->logger_init //(logger.c)
+		|-->start_logger_thread //(logger.c)
+			|-->do_run_logger_thread = 1
+			|-->logger_thread //(logger.c)创建log线程
+				|-->while (do_run_logger_thread) //进入loop循环
+					|-->logger_thread_read //(logger.c)
+						|-->
+	
 	|-->stats_init //()
 	|-->assoc_init //()
 	|-->conn_init //()
