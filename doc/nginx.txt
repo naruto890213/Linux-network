@@ -236,6 +236,16 @@ static ngx_event_module_t  ngx_event_core_module_ctx = {
     { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }
 };//(ngx_event.c)
 
+|-->command指令集 //(ngx_conf_file.h)
+	|-->struct ngx_command_s {
+	    ngx_str_t             name;
+	    ngx_uint_t            type;
+	    char               *(*set)(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+	    ngx_uint_t            conf;
+	    ngx_uint_t            offset;
+	    void                 *post;
+	};
+
 ngx_module_t *ngx_modules[] = {
     &ngx_core_module,
     &ngx_errlog_module,
@@ -354,7 +364,17 @@ ngx_module_t *ngx_modules[] = {
 				module->create_conf //调用回调函数，ngx_event_core_module_ctx中ngx_event_core_create_conf
 					|-->ngx_event_core_create_conf //(ngx_event.c)
 						|-->
-						
+		
+		|-->conf.module_type = NGX_CORE_MODULE
+		|-->conf.cmd_type = NGX_MAIN_CONF
+
+		|-->ngx_conf_param //(ngx_conf_file.c)
+			|-->conf_file.file.fd = NGX_INVALID_FILE
+			|-->conf_file.file.name.data = NULL
+			|-->conf_file.line = 0
+			|-->cf->conf_file = &conf_file
+			|-->ngx_conf_parse(cf, NULL) //(ngx_conf_file.c)
+
 		|-->for (i = 0; cycle->modules[i]; i++) //对全局modules指针数组进行轮巡
 			|-->if (cycle->modules[i]->type != NGX_CORE_MODULE)
 				|-->continue //只要type=NGX_CORE_MODULE的module
@@ -377,38 +397,82 @@ ngx_module_t *ngx_modules[] = {
 	|-->else //当ngx_process不等于NGX_PROCESS_SINGLE时进入该分支
 		|-->ngx_master_process_cycle //(ngx_process_cycle.c)
 			|-->ngx_init_cycle //(ngx_cycle.c)
-			
-			
-			
-|-->ngx_epoll_add_event //(ngx_epoll_module.c)
-	|-->epoll_ctl //
-	
-|-->ngx_epoll_eventfd_handler //(ngx_epoll_module.c)
-	|-->epoll_ctl
-	
-|-->ngx_epoll_add_connection //(ngx_epoll_module.c)
-
-|-->ngx_epoll_del_connection //
-
-|-->ngx_epoll_del_event //
-
-|-->ngx_epoll_init //(ngx_epoll_module.c)
-	|-->ngx_event_get_conf(cycle->conf_ctx, ngx_epoll_module) //(ngx_event.h) 关联ngx_epoll_module模块
-		|-->
-	
-	|-->ngx_epoll_notify_init //(ngx_epoll_module.c)
-	
-	|-->ngx_epoll_aio_init //(ngx_epoll_module.c)
-		|-->epoll_ctl
+			|-->ngx_start_worker_processes //(ngx_process_cycle.c)
+				|-->ngx_worker_process_cycle //(ngx_process_cycle.c)
+					|-->for (i = 0; cycle->modules[i]; i++) 
+						|-->if (cycle->modules[i]->init_process)
+							|-->cycle->modules[i]->init_process(cycle) //回调函数
+								|-->ngx_worker_process_init //(ngx_process_cycle.c)
+									|-->ngx_event_process_init //(ngx_event.c)
+										|-->for (m = 0; cycle->modules[m]; m++)
+											|-->if (cycle->modules[m]->type != NGX_EVENT_MODULE)
+												|-->continue
+									
+											|-->if (cycle->modules[m]->ctx_index != ecf->use)
+												|-->continue
+									
+											|-->module = cycle->modules[m]->ctx
+											|-->module->actions.init //(ngx_event.c) 调用回调函数
+												|-->ngx_epoll_init //(ngx_epoll_module.c) 调用epoll模块的init回调函
 		
-	|-->ngx_epoll_test_rdhup //(ngx_epoll_module.c)
-	
-
-|-->ngx_event_core_init_conf //(ngx_event.c)
-
-|-->ngx_event_process_init //(ngx_event.c)
-
-|-->ngx_conf_parse //(ngx_conf_file.c)
-	|-->ngx_conf_handler //(ngx_conf_file.c)
-		|-->cmd = cf->cycle->modules[i]->commands //
-			|-->
+			|-->ngx_start_cache_manager_processes //(ngx_process_cycle.c)
+				|-->ngx_cache_manager_process_cycle //(ngx_process_cycle.c)
+					
+					
+					
+		|-->ngx_epoll_add_event //(ngx_epoll_module.c)
+			|-->epoll_ctl //
+			
+		|-->ngx_epoll_eventfd_handler //(ngx_epoll_module.c)
+			|-->epoll_ctl
+			
+		|-->ngx_epoll_add_connection //(ngx_epoll_module.c)
+		
+		|-->ngx_epoll_del_connection //
+		
+		|-->ngx_epoll_del_event //
+		
+		|-->ngx_epoll_init //(ngx_epoll_module.c)
+			|-->ngx_event_get_conf(cycle->conf_ctx, ngx_epoll_module) //(ngx_event.h) 关联ngx_epoll_module模块
+				|-->
+			
+			|-->ngx_epoll_notify_init //(ngx_epoll_module.c)
+			
+			|-->ngx_epoll_aio_init //(ngx_epoll_module.c)
+				|-->epoll_ctl
+				
+			|-->ngx_epoll_test_rdhup //(ngx_epoll_module.c)
+			
+		
+		|-->ngx_event_core_init_conf //(ngx_event.c)
+		
+		|-->ngx_event_process_init //(ngx_event.c)
+		
+		|-->ngx_conf_parse //(ngx_conf_file.c)
+			|-->ngx_conf_handler //(ngx_conf_file.c)
+				|-->cmd = cf->cycle->modules[i]->commands //
+					|-->
+		
+		
+		|-->ngx_conf_parse //(ngx_conf_file.c)
+			|-->ngx_conf_handler //(ngx_conf_file.c)
+				|-->ngx_events_block //(ngx_event.c)
+					|-->for (i = 0; cf->cycle->modules[i]; i++)
+						|-->if (cf->cycle->modules[i]->type != NGX_EVENT_MODULE)
+							|-->continue
+				
+						|-->m = cf->cycle->modules[i]->ctx
+						|-->if (m->create_conf)
+							|-->m->create_conf //()
+				
+					|-->ngx_conf_parse//
+				
+					|-->for (i = 0; cf->cycle->modules[i]; i++)
+						|-->if (cf->cycle->modules[i]->type != NGX_EVENT_MODULE)
+							|-->continue
+				
+						|-->m = cf->cycle->modules[i]->ctx
+						|-->if (m->init_conf)
+							|-->m->init_conf //(ngx_event.c)
+		
+		
