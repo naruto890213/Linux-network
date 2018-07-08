@@ -402,6 +402,16 @@ ngx_module_t *ngx_modules[] = {
 		|-->ngx_open_listening_sockets //(ngx_connection.c)
 		|-->if (!ngx_test_config)			
 			|-->ngx_configure_listening_sockets //(ngx_connection.c)
+
+		|-->ngx_init_modules //(ngx_module.c)
+			|-->for (i = 0; cycle->modules[i]; i++)
+				|-->if (cycle->modules[i]->init_module)
+					|-->cycle->modules[i]->init_module(cycle)
+						|-->case ngx_event_core_module: 
+							|-->ngx_event_module_init //()
+								|-->ngx_shmtx_create(&ngx_accept_mutex, (ngx_shmtx_sh_t *) shared, cycle->lock_file.data)
+									|-->mtx->lock = &addr->lock; //addr=shared
+									|-->sem_init(&mtx->sem, 1, 0)
 		
 	|-->ngx_os_status //(ngx_posix_init.c) //打印一些os的状态值
 	
@@ -454,6 +464,8 @@ ngx_module_t *ngx_modules[] = {
 													|-->cycle->modules[i]->init_process(cycle) //回调函数
 														|-->case ngx_event_core_module:
 															|-->ngx_event_process_init //(ngx_event.c)
+																|-->ngx_queue_init(&ngx_posted_accept_events) //
+																|-->ngx_queue_init(&ngx_posted_events) //
 																|-->for (m = 0; cycle->modules[m]; m++)
 																	|-->if (cycle->modules[m]->type != NGX_EVENT_MODULE)
 																		|-->continue
@@ -484,6 +496,24 @@ ngx_module_t *ngx_modules[] = {
 																				
 																				|-->ngx_event_actions = ngx_epoll_module_ctx.actions //设置全局变量，回调设置，后面会用到
 																				
+																|-->for (i = 0; i < cycle->listening.nelts; i++)
+																	|-->if (ls[i].reuseport && ls[i].worker != ngx_worker) //是否开启SO_REUSEPORT功能,该功能需要内核支持,最低时kernel 3.9版本
+																		|-->continue;
+
+																	|-->c = ngx_get_connection(ls[i].fd, cycle->log) //(ngx_connection.c)
+
+																|-->rev->handler = (c->type == SOCK_STREAM) ? ngx_event_accept : ngx_event_recvmsg //设置rev的处理函数,根据协议类型选择(tcp, udp)
+
+																|-->if (ls[i].reuseport) //是否开启SO_REUSEPORT
+																	|-->ngx_add_event(rev, NGX_READ_EVENT, 0)
+
+																|-->if (ngx_use_accept_mutex)
+																	|-->continue;
+
+																|-->if ((ngx_event_flags & NGX_USE_EPOLL_EVENT) && ccf->worker_processes > 1) 
+																	|-->ngx_add_event(rev, NGX_READ_EVENT, NGX_EXCLUSIVE_EVENT) 
+																|-->ngx_add_event(rev, NGX_READ_EVENT, 0)
+
 											|-->ngx_add_channel_event(cycle, ngx_channel, NGX_READ_EVENT, ngx_channel_handler)
 											
 										|-->for ( ;; ) //进入loop
@@ -495,6 +525,9 @@ ngx_module_t *ngx_modules[] = {
 													|-->else
 														|-->ngx_trylock_accept_mutex //(ngx_event_accept.c)
 															|-->if (ngx_shmtx_trylock(&ngx_accept_mutex)) //尝试获取accept锁,如果获取到进入该分支
+																|-->if (ngx_accept_mutex_held && ngx_accept_events == 0)
+																	|-->return OK
+
 																|-->ngx_enable_accept_events //(ngx_event_accept.c)
 																	|-->for (i = 0; i < cycle->listening.nelts; i++)
 																		|-->c = ls[i].connection
@@ -509,6 +542,15 @@ ngx_module_t *ngx_modules[] = {
 																|-->ngx_accept_events = 0
 																|-->ngx_accept_mutex_held = 1
 																|-->return NGX_OK
+
+														|-->if (ngx_accept_mutex_held) //
+															|-->ngx_disable_accept_events //(ngx_event_accept.c)
+																|-->for (i = 0; i < cycle->listening.nelts; i++)
+																	|-->ngx_del_event(c->read, NGX_READ_EVENT, NGX_DISABLE_EVENT) //
+
+															|-->ngx_accept_mutex_held = 0;
+
+														|-->flags |= NGX_POST_EVENTS //对falg进行与处理,后面的步骤需要
 														
 												|-->ngx_process_events //(ngx_event.h)
 													|-->ngx_event_actions.process_events //使用回调函数
@@ -600,3 +642,9 @@ ngx_module_t *ngx_modules[] = {
 					|-->m->init_conf //(ngx_event.c)
 		
 		
+
+|-->ngx_event_process_init //(ngx_event.c)
+	|-->ngx_event_accept //(ngx_event_accept.c)
+		|-->
+
+
