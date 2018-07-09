@@ -333,13 +333,28 @@ ngx_module_t *ngx_modules[] = {
 	
 	|-->ngx_process_options //
 	
-	|-->ngx_os_init //
+	|-->ngx_os_init //(ngx_posix_init.c)
+		|-->ngx_inherited_nonblocking = 0 //设置变量
 	
-	|-->ngx_crc32_table_init //
+	|-->ngx_crc32_table_init //(ngx_crc32.c)
+		|-->ngx_crc32_table_short //对该值进行初始化赋值
 	
-	|-->ngx_slab_sizes_init //
+	|-->ngx_slab_sizes_init //(ngx_slab.c)
+		|-->ngx_slab_max_size = ngx_pagesize / 2
+		|-->ngx_slab_exact_size = ngx_pagesize / (8 * sizeof(uintptr_t))
 	
-	|-->ngx_add_inherited_sockets //
+	|-->ngx_add_inherited_sockets //(nginx.c)
+		|-->ngx_array_init(&cycle->listening, cycle->pool, 10, sizeof(ngx_listening_t) //(ngx_array.h)
+			|-->array->nelts = 0 
+			|-->array->pool = pool
+			|-->array->elts = ngx_palloc(pool, n * size) //对cycle->listening.elts进行分配，10个地址大小
+		
+		|-->ngx_inherited = 1 //赋值，后面的流程需要用到
+		
+		|-->ngx_set_inherited_sockets //(ngx_connection.c)
+			|-->ls = cycle->listening.elts
+			|-->for (i = 0; i < cycle->listening.nelts; i++) //进不去，nelts的值为0
+				|-->
 	
 	|-->ngx_preinit_modules //(ngx_module.c)
 		|-->for (i = 0; ngx_modules[i]; i++) //获取
@@ -377,6 +392,10 @@ ngx_module_t *ngx_modules[] = {
 			|-->conf_file.line = 0
 			|-->cf->conf_file = &conf_file
 			|-->ngx_conf_parse(cf, NULL) //(ngx_conf_file.c)
+			|-->cf->conf_file = NULL //
+			
+		|-->ngx_conf_parse //(ngx_conf_file.c)
+			|-->
 
 		|-->for (i = 0; cycle->modules[i]; i++) //对全局modules指针数组进行轮巡
 			|-->if (cycle->modules[i]->type != NGX_CORE_MODULE)
@@ -430,7 +449,10 @@ ngx_module_t *ngx_modules[] = {
 				
 			|-->sigemptyset(&sa.sa_mask)
 			|-->sigaction //设置信号执行函数
-			
+	
+	|-->if (ngx_inherited) //在上面的流程中被设置
+		|-->ngx_daemonized = 1 //设置daemon
+	
 	|-->ngx_create_pidfile //()
 	
 	|-->ngx_log_redirect_stderr //()
