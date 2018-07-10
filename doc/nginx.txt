@@ -365,6 +365,11 @@ ngx_module_t *ngx_modules[] = {
 		|-->ngx_max_module = ngx_modules_n + NGX_MAX_DYNAMIC_MODULES
 	
 	|-->ngx_init_cycle //(ngx_cycle.c)
+		|-->ngx_array_init(&cycle->listening, pool, n, sizeof(ngx_listening_t) //初始化listening
+		|-->ngx_memzero(cycle->listening.elts, n * sizeof(ngx_listening_t))
+		|-->ngx_queue_init(&cycle->reusable_connections_queue) //对队列进行初始化
+		|-->cycle->conf_ctx = ngx_pcalloc(pool, ngx_max_module * sizeof(void *)) //分配空间
+		
 		|-->ngx_cycle_modules //(ngx_module.c)
 			|-->cycle->modules = ngx_pcalloc(cycle->pool, (ngx_max_module + 1) * sizeof(ngx_module_t *)) //分配空间
 			|-->ngx_memcpy(cycle->modules, ngx_modules, ngx_modules_n * sizeof(ngx_module_t *)) //将全局module拷贝到cycle->modules
@@ -382,20 +387,100 @@ ngx_module_t *ngx_modules[] = {
 							|-->ccf->daemon = NGX_CONF_UNSET //初始化
 							|-->ccf->master = NGX_CONF_UNSET //初始化
 							|-->ccf->worker_processes = NGX_CONF_UNSET 
+							
+					|-->case ngx_regex_module:
+						|-->ngx_regex_create_conf //(ngx_regex.c)
+		
+		|-->conf.args = ngx_array_create(pool, 10, sizeof(ngx_str_t)) 
+		|-->conf.temp_pool = ngx_create_pool(NGX_CYCLE_POOL_SIZE, log)
 		
 		|-->conf.module_type = NGX_CORE_MODULE
 		|-->conf.cmd_type = NGX_MAIN_CONF
 
 		|-->ngx_conf_param //(ngx_conf_file.c)
+			|-->param = &cf->cycle->conf_param
+			|-->ngx_memzero(&b, sizeof(ngx_buf_t))//清空结构体b
+			|-->ngx_memzero(&conf_file, sizeof(ngx_conf_file_t))
+			|-->b.start = param->data
+			|-->b.pos = param->data
+			|-->b.last = param->data + param->len
+			|-->b.end = b.last
+			|-->b.temporary = 1
 			|-->conf_file.file.fd = NGX_INVALID_FILE
 			|-->conf_file.file.name.data = NULL
 			|-->conf_file.line = 0
 			|-->cf->conf_file = &conf_file
-			|-->ngx_conf_parse(cf, NULL) //(ngx_conf_file.c)
+			|-->cf->conf_file->buffer = &b 
+			|-->ngx_conf_parse(cf, NULL) //(ngx_conf_file.c) 对cf进行解析
 			|-->cf->conf_file = NULL //
 			
 		|-->ngx_conf_parse //(ngx_conf_file.c)
-			|-->
+			|-->if (filename) //filename是传入的第二个参数
+				|-->fd = ngx_open_file(filename->data, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0) //打开文件，实际调用的就是open函数, 返回fd
+				|-->if(fd == NGX_INVALID_FILE)
+					|-->return NGX_CONF_ERROR;
+					
+				|-->prev = cf->conf_file //使用prev将cf中的原始文件信息保存起来
+				|-->cf->conf_file = &conf_file //使用一个新的变量
+				
+				|-->ngx_fd_info(fd, &cf->conf_file->file.info) //读取文件属性(实际调用的是fstat，读取文件的属性)
+				|-->cf->conf_file->buffer = &buf //使用buf进行存储
+				|-->buf.start = ngx_alloc(NGX_CONF_BUFFER, cf->log) //进行空间分配
+				|-->buf.pos = buf.start
+				|-->buf.last = buf.start
+				|-->buf.end = buf.last + NGX_CONF_BUFFER //NGX_CONF_BUFFER = 4096, 指定偏移量
+				|-->buf.temporary = 1
+				|-->cf->conf_file->file.fd = fd //将fd进行赋值
+				|-->cf->conf_file->file.name.len = filename->len
+				|-->cf->conf_file->file.name.data = filename->data
+				|-->cf->conf_file->file.offset = 0
+				|-->cf->conf_file->file.log = cf->log
+				|-->cf->conf_file->line = 1
+				|-->type = parse_file //设置类型为文件解析
+				
+			|-->else if (cf->conf_file->file.fd != NGX_INVALID_FILE) //如果filename为空，但fd不为初始值
+				|-->type = parse_block //设置为解析block
+				
+			|-->else //如果filename为空，且cf->conf_file->file.fd为NGX_INVALID_FILE
+				|-->type = parse_param //设置为解析参数
+				
+			|-->for ( ;; )
+				|-->rc = ngx_conf_read_token(cf) //(ngx_conf_file.c)
+					|-->cf->args->nelts = 0
+					|-->start = b->pos
+					|-->start_line = cf->conf_file->line
+					|-->file_size = ngx_file_size(&cf->conf_file->file.info) //获取文件大小
+					
+					|-->for ( ;; )
+						|-->
+						
+				|-->ngx_conf_handler //(ngx_conf_file.c)
+					|-->name = cf->args->elts
+					
+					|-->for (i = 0; cf->cycle->modules[i]; i++)
+						|-->cmd = cf->cycle->modules[i]->commands //获取所有modules模块的cmd命令
+						|-->if (cmd == NULL)
+							|-->continue
+							
+						|-->for ( /* void */ ; cmd->name.len; cmd++)
+							|-->if (name->len != cmd->name.len)
+								|-->continue
+								
+							|-->if (ngx_strcmp(name->data, cmd->name.data) != 0)
+								|-->continue
+								
+							|-->found = 1
+							
+							|-->if (cf->cycle->modules[i]->type != NGX_CONF_MODULE && cf->cycle->modules[i]->type != cf->module_type)
+								|-->continue
+					
+							|-->if (!(cmd->type & cf->cmd_type))
+								|-->continue
+								
+							|-->if ((cmd->type & NGX_CONF_BLOCK) && last != NGX_CONF_BLOCK_START)
+								|-->return NGX_ERROR
+								
+							|-->
 
 		|-->for (i = 0; cycle->modules[i]; i++) //对全局modules指针数组进行轮巡
 			|-->if (cycle->modules[i]->type != NGX_CORE_MODULE)
@@ -412,11 +497,14 @@ ngx_module_t *ngx_modules[] = {
 									|-->ccf->master = 1 //设置master的值为1，该值在后面用来判断ngx_process工作类型
 									
 							|-->ngx_conf_init_value(ccf->worker_processes, 1) //将worker_processes的值设置为1
-									
-					|-->case ngx_event_core_module:
-						|-->ngx_event_core_init_conf //(ngx_event.c)
-							|-->fd = epoll_create(100) //创建epoll
-							|-->module = &ngx_epoll_module //关联epoll模块
+							
+					|-->case ngx_regex_module:
+						|-->ngx_regex_init_conf //()
+					
+					|-->ngx_events_module:
+						|-->ngx_event_init_conf //(ngx_event.c)
+							|-->ngx_get_conf(cycle->conf_ctx, ngx_events_module) //(ngx_event.c)
+								|-->return conf_ctx[module.index] //(ngx_conf_file.h)
 			
 		|-->ngx_open_listening_sockets //(ngx_connection.c)
 		|-->if (!ngx_test_config)			
