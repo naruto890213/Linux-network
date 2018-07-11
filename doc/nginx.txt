@@ -513,7 +513,114 @@ ngx_module_t *ngx_modules[] = {
 							|-->if ((cmd->type & NGX_CONF_BLOCK) && last != NGX_CONF_BLOCK_START)
 								|-->return NGX_ERROR
 								
-							|-->
+							|-->cmd->set(cf, cmd, conf) //调用cmd中的set回调函数
+								|-->case ngx_http_commands: //http的cmd
+									|-->ngx_http_block //(ngx_http.c)
+										|-->for (m = 0; cf->cycle->modules[m]; m++) //进行轮训
+											|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
+												|-->continue
+												
+											|-->module = cf->cycle->modules[m]->ctx
+											|-->mi = cf->cycle->modules[m]->ctx_index
+											
+											|-->if (module->create_main_conf)
+												|-->ctx->main_conf[mi] = module->create_main_conf //
+												
+											|-->if (module->create_srv_conf)
+												|-->ctx->srv_conf[mi] = module->create_srv_conf //
+												
+											|-->if (module->create_loc_conf)
+												|-->ctx->loc_conf[mi] = module->create_loc_conf //
+												
+										|-->for (m = 0; cf->cycle->modules[m]; m++) //进行轮训
+											|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
+												|-->continue
+												
+											|-->module = cf->cycle->modules[m]->ctx
+											
+											|-->if (module->preconfiguration)
+												|-->module->preconfiguration //
+												
+										|-->ngx_conf_parse //
+										
+										|-->for (m = 0; cf->cycle->modules[m]; m++)
+											|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
+												|-->continue
+												
+											|-->module = cf->cycle->modules[m]->ctx
+											
+											|-->if (module->init_main_conf)
+												|-->module->init_main_conf //
+												
+											|-->ngx_http_merge_servers //
+											
+										|-->for (s = 0; s < cmcf->servers.nelts; s++)
+											|-->ngx_http_init_locations //()
+											
+											|-->ngx_http_init_static_location_trees //()
+											
+										|-->ngx_http_init_phases //
+										
+										|-->ngx_http_init_headers_in_hash //
+										
+										|-->for (m = 0; cf->cycle->modules[m]; m++)
+											|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
+												|-->continue
+												
+											|-->module = cf->cycle->modules[m]->ctx
+											
+											|-->if (module->postconfiguration)
+												|-->module->postconfiguration //
+												
+										|-->ngx_http_variables_init_vars //()
+										
+										|-->ngx_http_init_phase_handlers //()
+											
+										|-->ngx_http_optimize_servers //(ngx_http.c)
+											|-->ngx_http_init_listening //(ngx_http.c)
+												|-->ngx_http_add_listening //(ngx_http.c)
+													|-->ls->handler = ngx_http_init_connection //设置回调函数
+
+
+								|-->case ngx_http_core_commands: 
+									|-->case "server":
+										|-->ngx_http_core_server //(ngx_http_core_module.c) NGX_HTTP_MODULE
+											|-->for (i = 0; cf->cycle->modules[i]; i++)
+												|-->if (cf->cycle->modules[i]->type != NGX_HTTP_MODULE)
+													|-->continue
+										
+												|-->module = cf->cycle->modules[i]->ctx
+												
+												|-->if (module->create_srv_conf) 
+													|-->mconf = module->create_srv_conf(cf) //回调函数
+														|-->case ngx_http_core_module:
+															|-->ngx_http_core_create_srv_conf //(ngx_http_core_module.c)
+																|-->ngx_array_init //
+																|-->
+										
+												|-->if (module->create_loc_conf)
+													|-->mconf = module->create_loc_conf(cf) //回调函数
+														|-->ngx_http_core_create_loc_conf //(ngx_http_core_module.c)
+															|-->
+										
+												|-->rv = ngx_conf_parse(cf, NULL) //对数据进行解析
+												
+												|-->if (rv == NGX_CONF_OK && !cscf->listen)
+													|-->ngx_sock_ntop //(ngx_inet.c)
+													|-->ngx_http_add_listen //(ngx_http.c)
+														|-->ngx_http_add_addresses //(ngx_http.c)
+															|-->ngx_http_add_server //(ngx_http.c)
+															|-->ngx_http_add_address //(ngx_http.c)
+																|-->ngx_http_add_server //(ngx_http.c)
+											|-->for (i = 0; cf->cycle->modules[i]; i++)
+												|-->if (cf->cycle->modules[i]->type != NGX_HTTP_MODULE)
+													|-->continue;
+
+												|-->module = cf->cycle->modules[i]->ctx //
+
+									|-->case "listen":
+										|-->ngx_http_core_listen //(ngx_http_core_module.c)
+											|-->
 
 		|-->for (i = 0; cycle->modules[i]; i++) //对全局modules指针数组进行轮巡
 			|-->if (cycle->modules[i]->type != NGX_CORE_MODULE)
@@ -638,6 +745,7 @@ ngx_module_t *ngx_modules[] = {
 																				|-->ngx_epoll_test_rdhup //(ngx_epoll_module.c)
 																				
 																				|-->ngx_event_actions = ngx_epoll_module_ctx.actions //设置全局变量，回调设置，后面会用到
+																				|-->ngx_event_flags = NGX_USE_CLEAR_EVENT //在可读事件添加时需要用到这个flag变量
 																				
 																|-->for (i = 0; i < cycle->listening.nelts; i++)
 																	|-->if (ls[i].reuseport && ls[i].worker != ngx_worker) //是否开启SO_REUSEPORT功能,该功能需要内核支持,最低时kernel 3.9版本
@@ -710,7 +818,25 @@ ngx_module_t *ngx_modules[] = {
 																		|-->rev->handler //(ngx_epoll_module.c)
 																			|-->ngx_event_accept //(ngx_event_accept.c)
 																				|-->ls->handler //(ngx_event_accept.c)
-																		
+																					|-->ngx_http_init_connection //(ngx_http_request.c)
+																						|-->rev->handler = ngx_http_wait_request_handler //() 设置可读回调函数	
+																						|-->c->write->handler = ngx_http_empty_handler //() 设置可写的回调函数
+																						|-->if (rev->ready) //可读
+																							|-->rev->handler //()
+																								|-->ngx_http_wait_request_handler //()
+																									|-->
+
+																						|-->ngx_add_timer(rev, c->listening->post_accept_timeout) //
+																						|-->ngx_reusable_connection(c, 1) //
+																						|-->ngx_handle_read_event(rev, 0) //(ngx_event.c) 添加到可读事件中
+																							|-->if (ngx_event_flags & NGX_USE_CLEAR_EVENT) //epoll会进入到该分支,在epoll_init你们进行设置
+																								|-->if (!rev->active && !rev->ready)
+																									|-->ngx_add_event(rev, NGX_READ_EVENT, NGX_CLEAR_EVENT) //
+																										|-->ngx_event_actions.add //(ngx_event.h)
+																											|-->ngx_epoll_add_event //(ngx_epoll_module.c)
+																												|-->epoll_ctl
+																												|-->ev->active = 1 //添加后将active设置为1,防止重复加入
+
 																|-->wev = c->write
 																|-->if ((revents & EPOLLOUT) && wev->active)
 																	|-->wev->ready = 1
@@ -791,103 +917,6 @@ ngx_module_t *ngx_modules[] = {
 |-->ngx_event_process_init //(ngx_event.c)
 	|-->ngx_event_accept //(ngx_event_accept.c)
 		|-->
-
-
-|-->ngx_http_block //(ngx_http.c)
-	|-->for (m = 0; cf->cycle->modules[m]; m++) //进行轮训
-		|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
-			|-->continue
-			
-		|-->module = cf->cycle->modules[m]->ctx
-		|-->mi = cf->cycle->modules[m]->ctx_index
-		
-		|-->if (module->create_main_conf)
-			|-->ctx->main_conf[mi] = module->create_main_conf //
-			
-		|-->if (module->create_srv_conf)
-			|-->ctx->srv_conf[mi] = module->create_srv_conf //
-			
-		|-->if (module->create_loc_conf)
-			|-->ctx->loc_conf[mi] = module->create_loc_conf //
-			
-	|-->for (m = 0; cf->cycle->modules[m]; m++) //进行轮训
-		|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
-			|-->continue
-			
-		|-->module = cf->cycle->modules[m]->ctx
-		
-		|-->if (module->preconfiguration)
-			|-->module->preconfiguration //
-			
-	|-->ngx_conf_parse //
-	
-	|-->for (m = 0; cf->cycle->modules[m]; m++)
-		|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
-			|-->continue
-			
-		|-->module = cf->cycle->modules[m]->ctx
-		
-		|-->if (module->init_main_conf)
-			|-->module->init_main_conf //
-			
-		|-->ngx_http_merge_servers //
-		
-	|-->for (s = 0; s < cmcf->servers.nelts; s++)
-		|-->ngx_http_init_locations //()
-		
-		|-->ngx_http_init_static_location_trees //()
-		
-	|-->ngx_http_init_phases //
-	
-	|-->ngx_http_init_headers_in_hash //
-	
-	|-->for (m = 0; cf->cycle->modules[m]; m++)
-		|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
-			|-->continue
-			
-		|-->module = cf->cycle->modules[m]->ctx
-		
-		|-->if (module->postconfiguration)
-			|-->module->postconfiguration //
-			
-	|-->ngx_http_variables_init_vars //()
-	
-	|-->ngx_http_init_phase_handlers //()
-		
-	|-->ngx_http_optimize_servers //(ngx_http.c)
-		|-->ngx_http_init_listening //(ngx_http.c)
-			|-->ngx_http_add_listening //(ngx_http.c)
-				|-->ls->handler = ngx_http_init_connection //设置回调函数
-
-				
-|-->ngx_http_core_server //(ngx_http_core_module.c) NGX_HTTP_MODULE
-	|-->for (i = 0; cf->cycle->modules[i]; i++)
-		|-->if (cf->cycle->modules[i]->type != NGX_HTTP_MODULE)
-			|-->continue
-
-		|-->module = cf->cycle->modules[i]->ctx
-		
-		|-->if (module->create_srv_conf) 
-			|-->mconf = module->create_srv_conf(cf) //回调函数
-				|-->case ngx_http_core_module:
-					|-->ngx_http_core_create_srv_conf //(ngx_http_core_module.c)
-						|-->ngx_array_init //
-						|-->
-
-		|-->if (module->create_loc_conf)
-			|-->mconf = module->create_loc_conf(cf) //回调函数
-				|-->ngx_http_core_create_loc_conf //(ngx_http_core_module.c)
-					|-->
-
-		|-->rv = ngx_conf_parse(cf, NULL) //对数据进行解析
-		
-		|-->if (rv == NGX_CONF_OK && !cscf->listen)
-			|-->ngx_sock_ntop //(ngx_inet.c)
-			|-->ngx_http_add_listen //(ngx_http.c)
-				|-->ngx_http_add_addresses //(ngx_http.c)
-					|-->ngx_http_add_server //(ngx_http.c)
-					|-->ngx_http_add_address //(ngx_http.c)
-						|-->ngx_http_add_server //(ngx_http.c)
 
 |-->ngx_http_upstream_server //() NGX_HTTP_MODULE
 
