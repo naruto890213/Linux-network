@@ -1,5 +1,4 @@
 |-----------------------重要数据结构-------------------------------------
-
 |-->typedef struct ngx_module_s          ngx_module_t
 |-->typedef struct ngx_conf_s            ngx_conf_t
 |-->typedef struct ngx_cycle_s           ngx_cycle_t
@@ -333,6 +332,17 @@ ngx_module_t *ngx_modules[] = {
     &ngx_http_not_modified_filter_module,
     NULL
 }; //(objs/ngx_modules.c) 所有module的集合
+
+ngx_os_io_t ngx_os_io = {
+    ngx_unix_recv,
+    ngx_readv_chain,
+    ngx_udp_unix_recv,
+    ngx_unix_send,
+    ngx_udp_unix_send,
+    ngx_udp_unix_sendmsg_chain,
+    ngx_writev_chain,
+    0
+};//(ngx_posix_init.c) linux系统下的默认socket操作函数组
 
 |-->ngx_process_events_and_timers //(ngx_event.c) 处理不同的事件
 	|-->ngx_trylock_accept_mutex //(ngx_event_accept.c)
@@ -727,7 +737,6 @@ ngx_module_t *ngx_modules[] = {
 																	|-->module->actions.init //(ngx_event.c) 调用回调函数
 																		|-->ngx_epoll_init //(ngx_epoll_module.c) 调用epoll模块的init回调函
 																			|-->ngx_event_get_conf(cycle->conf_ctx, ngx_epoll_module) //(ngx_event.h) 关联ngx_epoll_module模块
-																				|-->
 																			
 																			|-->if (ep == -1) //第一次进入时ep=-1，创建epoll后该值将不等于-1
 																				|-->ep = epoll_create(cycle->connection_n / 2) //创建epoll
@@ -744,7 +753,8 @@ ngx_module_t *ngx_modules[] = {
 																				
 																				|-->ngx_epoll_test_rdhup //(ngx_epoll_module.c)
 																				
-																				|-->ngx_event_actions = ngx_epoll_module_ctx.actions //设置全局变量，回调设置，后面会用到
+																				|-->ngx_io = ngx_os_io //设置全局变量，用于io操作(socket接收，发送等)
+																				|-->ngx_event_actions = ngx_epoll_module_ctx.actions //设置全局变量，回调函数设置，后面需要用到(按模块功能划分)
 																				|-->ngx_event_flags = NGX_USE_CLEAR_EVENT //在可读事件添加时需要用到这个flag变量
 																				
 																|-->for (i = 0; i < cycle->listening.nelts; i++)
@@ -816,26 +826,42 @@ ngx_module_t *ngx_modules[] = {
 																		
 																	|-->else
 																		|-->rev->handler //(ngx_epoll_module.c)
-																			|-->ngx_event_accept //(ngx_event_accept.c)
-																				|-->ls->handler //(ngx_event_accept.c)
-																					|-->ngx_http_init_connection //(ngx_http_request.c)
-																						|-->rev->handler = ngx_http_wait_request_handler //() 设置可读回调函数	
-																						|-->c->write->handler = ngx_http_empty_handler //() 设置可写的回调函数
-																						|-->if (rev->ready) //可读
-																							|-->rev->handler //()
-																								|-->ngx_http_wait_request_handler //()
-																									|-->
-
-																						|-->ngx_add_timer(rev, c->listening->post_accept_timeout) //
-																						|-->ngx_reusable_connection(c, 1) //
-																						|-->ngx_handle_read_event(rev, 0) //(ngx_event.c) 添加到可读事件中
-																							|-->if (ngx_event_flags & NGX_USE_CLEAR_EVENT) //epoll会进入到该分支,在epoll_init你们进行设置
-																								|-->if (!rev->active && !rev->ready)
-																									|-->ngx_add_event(rev, NGX_READ_EVENT, NGX_CLEAR_EVENT) //
-																										|-->ngx_event_actions.add //(ngx_event.h)
-																											|-->ngx_epoll_add_event //(ngx_epoll_module.c)
-																												|-->epoll_ctl
-																												|-->ev->active = 1 //添加后将active设置为1,防止重复加入
+																			|-->switch(state) //根据状态的不同，handler也不同, state是自己添加的表示状态机
+																				|-->case new_client //从listen状态接收到的新连接socket，准备accept
+																					|-->ngx_event_accept //(ngx_event_accept.c)
+																						|-->c->recv = ngx_recv //设置回调函数绑定
+																						|-->c->send = ngx_send //设置回调函数绑定
+																						|-->ls->handler //(ngx_event_accept.c)
+																							|-->ngx_http_init_connection //(ngx_http_request.c)
+																								|-->rev->handler = ngx_http_wait_request_handler //() 设置可读回调函数	
+																								|-->c->write->handler = ngx_http_empty_handler //() 设置可写的回调函数
+																								|-->if (rev->ready) //可读
+																									|-->rev->handler //(ngx_event_accept.c) 执行回调函数 ngx_http_wait_request_handler
+																																						
+																								|-->ngx_add_timer(rev, c->listening->post_accept_timeout) //
+																								|-->ngx_reusable_connection(c, 1) //
+																								|-->ngx_handle_read_event(rev, 0) //(ngx_event.c) 添加到可读事件中
+																									|-->if (ngx_event_flags & NGX_USE_CLEAR_EVENT) //epoll会进入到该分支,在epoll_init你们进行设置
+																										|-->if (!rev->active && !rev->ready)
+																											|-->ngx_add_event(rev, NGX_READ_EVENT, NGX_CLEAR_EVENT) //
+																												|-->ngx_event_actions.add //(ngx_event.h)
+																													|-->ngx_epoll_add_event //(ngx_epoll_module.c)
+																														|-->epoll_ctl
+																														|-->ev->active = 1 //添加后将active设置为1,防止重复加入
+																														
+																				|-->case http_request //accept后的socket，等待数据的到来
+																					|-->ngx_http_wait_request_handler //(ngx_http_request.c)
+																						|-->n = c->recv(c, b->last, size) //接收数据
+																							|-->ngx_recv //(ngx_event.h)
+																								|-->ngx_io.recv //(ngx_event.h) 在epoll_init里面将ngx_io设置为 ngx_os_io
+																									|-->ngx_unix_recv //(ngx_recv.c) 使用recv接收数据
+																									
+																						|-->ngx_reusable_connection(c, 0) //
+																						|-->rev->handler = ngx_http_process_request_line //设置新的回调函数，进入下一个状态
+																						|-->ngx_http_process_request_line //
+																						
+																				|-->case request_line //当接收
+																					|-->ngx_http_process_request_line //(ngx_http_request.c)
 
 																|-->wev = c->write
 																|-->if ((revents & EPOLLOUT) && wev->active)
