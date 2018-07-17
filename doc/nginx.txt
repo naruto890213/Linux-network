@@ -344,14 +344,21 @@ ngx_os_io_t ngx_os_io = {
     0
 };//(ngx_posix_init.c) linux系统下的默认socket操作函数组
 
-|-->ngx_process_events_and_timers //(ngx_event.c) 处理不同的事件
-	|-->ngx_trylock_accept_mutex //(ngx_event_accept.c)
-		|-->ngx_shmtx_trylock //()
-		|-->
-
-	|-->ngx_process_events(cycle, timer, flags) //实际调用ngx_epoll_process_events函数开始处理
-		|-->ngx_epoll_process_events //(ngx_epoll_module.c)
-			|-->epoll_wait //(ngx_process_events.c)
+//ngx_thread_pool_module 线程池模块 //(ngx_thread_pool.c) 默认是不启用的，需要在configure时进行配置--with-threads进行开启
+ngx_module_t  ngx_thread_pool_module = {
+    NGX_MODULE_V1,
+    &ngx_thread_pool_module_ctx,           /* module context */
+    ngx_thread_pool_commands,              /* module directives */
+    NGX_CORE_MODULE,                       /* module type */
+    NULL,                                  /* init master */
+    NULL,                                  /* init module */
+    ngx_thread_pool_init_worker,           /* init process */
+    NULL,                                  /* init thread */
+    NULL,                                  /* exit thread */
+    ngx_thread_pool_exit_worker,           /* exit process */
+    NULL,                                  /* exit master */
+    NGX_MODULE_V1_PADDING
+}; 
 
 
 |-->main //(nginx.c) nginx函数入口
@@ -397,7 +404,6 @@ ngx_os_io_t ngx_os_io = {
 		|-->ngx_set_inherited_sockets //(ngx_connection.c)
 			|-->ls = cycle->listening.elts
 			|-->for (i = 0; i < cycle->listening.nelts; i++) //进不去，nelts的值为0
-				|-->
 	
 	|-->ngx_preinit_modules //(ngx_module.c)
 		|-->for (i = 0; ngx_modules[i]; i++) //获取
@@ -425,14 +431,17 @@ ngx_os_io_t ngx_os_io = {
 			|-->module = cycle->modules[i]->ctx //获取结构体中ngx_event_module_t成员, 本次分析以ngx_event_core_module_ctx为例子
 			|-->if (module->create_conf) //如果create_conf回调函数存在则调用回调
 				module->create_conf //调用关联模块的回调函数
-					|-->case ngx_core_module:
+					|-->case ngx_core_module: //核心模块
 						|-->ngx_core_module_create_conf //(nginx.c)
 							|-->ccf->daemon = NGX_CONF_UNSET //初始化
 							|-->ccf->master = NGX_CONF_UNSET //初始化
 							|-->ccf->worker_processes = NGX_CONF_UNSET 
 							
-					|-->case ngx_regex_module:
+					|-->case ngx_regex_module: //反向连接模块
 						|-->ngx_regex_create_conf //(ngx_regex.c)
+						
+					|-->case ngx_thread_pool_module: //线程池模块
+						|-->ngx_thread_pool_create_conf //(ngx_thread_pool.c)
 		
 		|-->conf.args = ngx_array_create(pool, 10, sizeof(ngx_str_t)) 
 		|-->conf.temp_pool = ngx_create_pool(NGX_CYCLE_POOL_SIZE, log)
@@ -656,6 +665,9 @@ ngx_os_io_t ngx_os_io = {
 							|-->ngx_get_conf(cycle->conf_ctx, ngx_events_module) //(ngx_event.c)
 								|-->return conf_ctx[module.index] //(ngx_conf_file.h)
 			
+					|-->ngx_thread_pool_module //线程池模块
+						|-->ngx_thread_pool_init_conf //(ngx_thread_pool.c)
+			
 		|-->ngx_open_listening_sockets //(ngx_connection.c)
 		|-->if (!ngx_test_config)			
 			|-->ngx_configure_listening_sockets //(ngx_connection.c)
@@ -717,111 +729,10 @@ ngx_os_io_t ngx_os_io = {
 									|-->ngx_worker_process_cycle //(ngx_process_cycle.c)
 										|-->ngx_process = NGX_PROCESS_WORKER //将其设置为NGX_PROCESS_WORKER
 										|-->ngx_worker = worker
-										|-->ngx_worker_process_init //(ngx_process_cycle.c)
-											|-->ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module)
-											|-->for (i = 0; cycle->modules[i]; i++) 
-												|-->if (cycle->modules[i]->init_process)
-													|-->cycle->modules[i]->init_process(cycle) //回调函数
-														|-->case ngx_event_core_module:
-															|-->ngx_event_process_init //(ngx_event.c)
-																|-->ngx_queue_init(&ngx_posted_accept_events) //
-																|-->ngx_queue_init(&ngx_posted_events) //
-																|-->for (m = 0; cycle->modules[m]; m++)
-																	|-->if (cycle->modules[m]->type != NGX_EVENT_MODULE)
-																		|-->continue
-															
-																	|-->if (cycle->modules[m]->ctx_index != ecf->use)
-																		|-->continue
-															
-																	|-->module = cycle->modules[m]->ctx
-																	|-->module->actions.init //(ngx_event.c) 调用回调函数
-																		|-->ngx_epoll_init //(ngx_epoll_module.c) 调用epoll模块的init回调函
-																			|-->ngx_event_get_conf(cycle->conf_ctx, ngx_epoll_module) //(ngx_event.h) 关联ngx_epoll_module模块
-																			
-																			|-->if (ep == -1) //第一次进入时ep=-1，创建epoll后该值将不等于-1
-																				|-->ep = epoll_create(cycle->connection_n / 2) //创建epoll
-																				
-																				|-->ngx_epoll_notify_init //(ngx_epoll_module.c) //(ngx_epoll_module.c)
-																					|-->notify_fd = eventfd(0, 0) //创建eventfd，用于通知消息
-																					|-->notify_event.handler = ngx_epoll_notify_handler //设置handler回调函数
-																					|-->notify_event.active = 1
-																					|-->notify_conn.fd = notify_fd
-																					|-->ee.events = EPOLLIN|EPOLLET
-																					|-->epoll_ctl(ep, EPOLL_CTL_ADD, notify_fd, &ee) //将notify_fd加入到epoll队列中
-																			
-																				|-->ngx_epoll_aio_init //(ngx_epoll_module.c) //默认不调用该函数，因为NGX_HAVE_FILE_AIO宏未定义
-																				
-																				|-->ngx_epoll_test_rdhup //(ngx_epoll_module.c)
-																				
-																				|-->ngx_io = ngx_os_io //设置全局变量，用于io操作(socket接收，发送等)
-																				|-->ngx_event_actions = ngx_epoll_module_ctx.actions //设置全局变量，回调函数设置，后面需要用到(按模块功能划分)
-																				|-->ngx_event_flags = NGX_USE_CLEAR_EVENT //在可读事件添加时需要用到这个flag变量
-																				
-																|-->for (i = 0; i < cycle->listening.nelts; i++)
-																	|-->if (ls[i].reuseport && ls[i].worker != ngx_worker) //是否开启SO_REUSEPORT功能,该功能需要内核支持,最低时kernel 3.9版本
-																		|-->continue;
-
-																	|-->c = ngx_get_connection(ls[i].fd, cycle->log) //(ngx_connection.c)
-
-																|-->rev->handler = (c->type == SOCK_STREAM) ? ngx_event_accept : ngx_event_recvmsg //设置rev的处理函数,根据协议类型选择(tcp, udp)
-
-																|-->if (ls[i].reuseport) //是否开启SO_REUSEPORT
-																	|-->ngx_add_event(rev, NGX_READ_EVENT, 0)
-
-																|-->if (ngx_use_accept_mutex)
-																	|-->continue;
-
-																|-->if ((ngx_event_flags & NGX_USE_EPOLL_EVENT) && ccf->worker_processes > 1) 
-																	|-->ngx_add_event(rev, NGX_READ_EVENT, NGX_EXCLUSIVE_EVENT) 
-																|-->ngx_add_event(rev, NGX_READ_EVENT, 0)
-
-											|-->ngx_add_channel_event(cycle, ngx_channel, NGX_READ_EVENT, ngx_channel_handler)
-											
+										|-->ngx_worker_process_init //(ngx_process_cycle.c) worker初始化操作，其内部实现见下面的函数解析
+		
 										|-->for ( ;; ) //进入loop
-											|-->ngx_process_events_and_timers //(ngx_event.c)
-												|-->if (ngx_use_accept_mutex) //是否使用accept锁
-													|-->if (ngx_accept_disabled > 0)
-														|-->ngx_accept_disabled--
-													
-													|-->else
-														|-->ngx_trylock_accept_mutex //(ngx_event_accept.c)
-															|-->if (ngx_shmtx_trylock(&ngx_accept_mutex)) //尝试获取accept锁,如果获取到进入该分支
-																|-->if (ngx_accept_mutex_held && ngx_accept_events == 0)
-																	|-->return OK
-
-																|-->ngx_enable_accept_events //(ngx_event_accept.c)
-																	|-->for (i = 0; i < cycle->listening.nelts; i++)
-																		|-->c = ls[i].connection
-																		|-->if (c == NULL || c->read->active)
-																			continue
-																			
-																		|-->ngx_add_event(c->read, NGX_READ_EVENT, 0) //(ngx_event.h)
-																			|-->ngx_event_actions.add //使用ngx_event_actions的add回调函数
-																				|-->ngx_epoll_add_event //(ngx_epoll_module.c)
-																					|-->epoll_ctl //添加事件
-																
-																|-->ngx_accept_events = 0
-																|-->ngx_accept_mutex_held = 1
-																|-->return NGX_OK
-
-														|-->if (ngx_accept_mutex_held) //
-															|-->ngx_disable_accept_events //(ngx_event_accept.c)
-																|-->for (i = 0; i < cycle->listening.nelts; i++)
-																	|-->ngx_del_event(c->read, NGX_READ_EVENT, NGX_DISABLE_EVENT) //
-
-															|-->ngx_accept_mutex_held = 0;
-
-														|-->flags |= NGX_POST_EVENTS //对falg进行与处理,后面的步骤需要
-														
-												|-->ngx_process_events //(ngx_event.h)
-													|-->ngx_event_actions.process_events //使用回调函数
-														|-->ngx_epoll_process_events //(ngx_epoll_module.c) 具体的事件处理, 其内部处理流程常见下面的函数梳理
-												|-->ngx_event_process_posted(cycle, &ngx_posted_accept_events) //
-												
-												|--> if (ngx_accept_mutex_held)
-													|-->ngx_shmtx_unlock(&ngx_accept_mutex)
-													
-												|-->ngx_event_process_posted(cycle, &ngx_posted_events)
+											|-->ngx_process_events_and_timers //(ngx_event.c) //nginx的数据处理，其函数见下面的函数说明
 																		
 							|-->default: //父进程
 								|-->break //不做任何动作，直接break
@@ -836,7 +747,7 @@ ngx_os_io_t ngx_os_io = {
 			|-->for ( ;; ) //父进程进入loop循环
 				|-->
 					
-					
+|-------------------nginx重要的函数实现解析---------------------------|					
 					
 |-->ngx_epoll_add_event //(ngx_epoll_module.c)
 	|-->epoll_ctl //
@@ -855,13 +766,7 @@ ngx_os_io_t ngx_os_io = {
 
 |-->ngx_event_process_init //(ngx_event.c)
 
-|-->ngx_conf_parse //(ngx_conf_file.c)
-	|-->ngx_conf_handler //(ngx_conf_file.c) 
-		|-->cmd = cf->cycle->modules[i]->commands //
-			|-->
-
-
-|-->ngx_conf_parse //(ngx_conf_file.c)
+|-->ngx_conf_parse //(ngx_conf_file.c) 参数解析函数，用于解析nginx的配置文件及传入参数
 	|-->ngx_conf_handler //(ngx_conf_file.c)
 		|-->ngx_events_block //(ngx_event.c)
 			|-->for (i = 0; cf->cycle->modules[i]; i++)
@@ -886,34 +791,200 @@ ngx_os_io_t ngx_os_io = {
 
 |-->ngx_event_process_init //(ngx_event.c)
 	|-->ngx_event_accept //(ngx_event_accept.c)
-		|-->
 
+|-->ngx_http_file_cache_open //(ngx_http_file_cache.c)
+	|-->ngx_http_file_cache_read //(ngx_http_file_cache.c)
+		|-->ngx_http_file_cache_aio_read //(ngx_http_file_cache.c)
+			|-->ngx_http_cache_thread_handler //(ngx_thread_pool.c)
+				|-->task->event.data = r
+				|-->task->event.handler = ngx_http_cache_thread_event_handler
+				|-->ngx_thread_task_post //(ngx_thread_pool.c)
+					|-->task->event.active = 1
+					|-->task->id = ngx_thread_pool_task_id++
+					|-->task->next = NULL
+					|-->ngx_thread_cond_signal(&tp->cond, tp->log) //发送条件变量
+					|-->*tp->queue.last = task
+					|-->tp->queue.last = &task->next
+					|-->tp->waiting++
+					
+			|-->ngx_read_file 
+
+		
 |-->ngx_http_upstream_server //() NGX_HTTP_MODULE
 
-|-->ngx_thread_pool_init_worker //(ngx_thread_pool.c)
-	|-->for (i = 0; i < tcf->pools.nelts; i++)
+|-->ngx_thread_pool_init_worker //(ngx_thread_pool.c) 线程池初始化
+	|-->ngx_thread_pool_queue_init(&ngx_thread_pool_done) //初始化ngx_thread_pool_done
+	
+	|-->for (i = 0; i < tcf->pools.nelts; i++) //根据定义的线程池个数进行初始化
+		|-->ngx_thread_pool_queue_init(&tp->queue) //
+		|-->ngx_thread_mutex_create(&tp->mtx, log) //
+		|-->ngx_thread_cond_create(&tp->cond, log) //
 		|-->ngx_thread_pool_init //(ngx_thread_pool.c)
-			|-->for (n = 0; n < tp->threads; n++)
-				|-->pthread_create(&tid, &attr, ngx_thread_pool_cycle, tp)
-					|-->ngx_thread_pool_cycle //(ngx_thread_pool.c)
-						|-->
+			|-->for (n = 0; n < tp->threads; n++) //当前线程池内的线程个数
+				|-->pthread_create(&tid, &attr, ngx_thread_pool_cycle, tp) //创建运行线程 ngx_thread_pool_cycle
+				
 
-|-->ngx_thread_pool_add //
-	|-->
+|-->ngx_thread_pool_cycle //(ngx_thread_pool.c) 线程池的工作线程
+	|-->for ( ;; )
+		|-->ngx_thread_mutex_lock(&tp->mtx, tp->log) 
+		|-->tp->waiting--
+		|-->while (tp->queue.first == NULL)
+			|-->ngx_thread_cond_wait(&tp->cond, &tp->mtx, tp->log) //等待条件变量
+			
+		|-->task->handler(task->ctx, tp->log) //调用函数
+		|-->ngx_notify(ngx_thread_pool_handler) //
+			|-->ngx_event_actions.notify //回调函数，实际执行的是 ngx_epoll_notify
+				|-->ngx_epoll_notify //(ngx_epoll_module.c)
+					|-->static uint64_t inc = 1
+					|-->notify_event.data = handler //将 ngx_thread_pool_handler 赋值到 data
+					|-->write(notify_fd, &inc, sizeof(uint64_t) //向notify_fd写入参数以触发其监听函数，监听函数为ngx_epoll_notify_init中初始化的 ngx_epoll_notify_handler
 
-
+					
+|-->ngx_epoll_notify_handler //(ngx_epoll_module.c) 线程池中通知处理函数
+	|-->if (++ev->index == NGX_MAX_UINT32_VALUE)
+		|-->n = read(notify_fd, &count, sizeof(uint64_t))
+		|-->if ((size_t) n != sizeof(uint64_t))
+			|-->ngx_log_error //打印错误log
+			
+	|-->handler = ev->data //对应ngx_thread_pool_cycle中传入的handler，即 ngx_thread_pool_handler
+	|-->handler(ev) //实际调用的函数为 ngx_thread_pool_handler
+		|-->ngx_thread_pool_handler //(ngx_thread_pool.c)
+			|-->task = ngx_thread_pool_done.first 
+			|-->ngx_thread_pool_done.first = NULL
+			|-->ngx_thread_pool_done.last = &ngx_thread_pool_done.first
+			
+			|-->while (task)
+				|-->event = &task->event
+				|-->task = task->next
+				|-->event->complete = 1
+				|-->event->active = 0
+				|-->event->handler //执行handler回调函数
+				
+						
 |-->ngx_thread_pool_module //(ngx_thread_pool.c)
 
 |-->ngx_thread_pool_add //(ngx_thread_pool.c)
 
 |-->ngx_thread_pool_get //(ngx_thread_pool.c)
 
-|-->ngx_thread_pool_init_worker //(ngx_thread_pool.c)
-
 |-->ngx_thread_pool_exit_worker //(ngx_thread_pool.c)
 
 |-->ngx_http_core_set_aio //(ngx_http_core_module.c)
 
+ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
+                   "http process request line")
+
+|-->ngx_worker_process_init //(ngx_process_cycle.c) worker的初始化函数，用于初始化绑定系统调用关系(epoll)
+	|-->ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module)
+	|-->for (i = 0; cycle->modules[i]; i++) 
+		|-->if (cycle->modules[i]->init_process)
+			|-->cycle->modules[i]->init_process(cycle) //回调函数
+				|-->case ngx_thread_pool_module: //线程池模块
+					|-->ngx_thread_pool_init_worker //(ngx_thread_pool.c)
+				
+				|-->case ngx_event_core_module: //event模块
+					|-->ngx_event_process_init //(ngx_event.c)
+						|-->ngx_queue_init(&ngx_posted_accept_events) //
+						|-->ngx_queue_init(&ngx_posted_events) //
+						|-->for (m = 0; cycle->modules[m]; m++)
+							|-->if (cycle->modules[m]->type != NGX_EVENT_MODULE)
+								|-->continue
+					
+							|-->if (cycle->modules[m]->ctx_index != ecf->use)
+								|-->continue
+					
+							|-->module = cycle->modules[m]->ctx
+							|-->module->actions.init //(ngx_event.c) 调用回调函数
+								|-->ngx_epoll_init //(ngx_epoll_module.c) 调用epoll模块的init回调函
+									|-->ngx_event_get_conf(cycle->conf_ctx, ngx_epoll_module) //(ngx_event.h) 关联ngx_epoll_module模块
+									
+									|-->if (ep == -1) //第一次进入时ep=-1，创建epoll后该值将不等于-1
+										|-->ep = epoll_create(cycle->connection_n / 2) //创建epoll
+										
+										|-->ngx_epoll_notify_init //(ngx_epoll_module.c) //(ngx_epoll_module.c)
+											|-->notify_fd = eventfd(0, 0) //创建eventfd，用于通知消息
+											|-->notify_event.handler = ngx_epoll_notify_handler //设置handler回调函数
+											|-->notify_event.active = 1
+											|-->notify_conn.fd = notify_fd
+											|-->ee.events = EPOLLIN|EPOLLET
+											|-->epoll_ctl(ep, EPOLL_CTL_ADD, notify_fd, &ee) //将notify_fd加入到epoll队列中
+									
+										|-->ngx_epoll_aio_init //(ngx_epoll_module.c) //默认不调用该函数，因为NGX_HAVE_FILE_AIO宏未定义
+										
+										|-->ngx_epoll_test_rdhup //(ngx_epoll_module.c)
+										
+										|-->ngx_io = ngx_os_io //设置全局变量，用于io操作(socket接收，发送等)
+										|-->ngx_event_actions = ngx_epoll_module_ctx.actions //设置全局变量，回调函数设置，后面需要用到(按模块功能划分)
+										|-->ngx_event_flags = NGX_USE_CLEAR_EVENT //在可读事件添加时需要用到这个flag变量
+										
+						|-->for (i = 0; i < cycle->listening.nelts; i++)
+							|-->if (ls[i].reuseport && ls[i].worker != ngx_worker) //是否开启SO_REUSEPORT功能,该功能需要内核支持,最低时kernel 3.9版本
+								|-->continue;
+
+							|-->c = ngx_get_connection(ls[i].fd, cycle->log) //(ngx_connection.c)
+
+						|-->rev->handler = (c->type == SOCK_STREAM) ? ngx_event_accept : ngx_event_recvmsg //设置rev的处理函数,根据协议类型选择(tcp, udp)
+
+						|-->if (ls[i].reuseport) //是否开启SO_REUSEPORT
+							|-->ngx_add_event(rev, NGX_READ_EVENT, 0)
+
+						|-->if (ngx_use_accept_mutex)
+							|-->continue;
+
+						|-->if ((ngx_event_flags & NGX_USE_EPOLL_EVENT) && ccf->worker_processes > 1) 
+							|-->ngx_add_event(rev, NGX_READ_EVENT, NGX_EXCLUSIVE_EVENT) 
+						|-->ngx_add_event(rev, NGX_READ_EVENT, 0)
+
+	|-->ngx_add_channel_event(cycle, ngx_channel, NGX_READ_EVENT, ngx_channel_handler)
+	
+
+|-->ngx_process_events_and_timers //(ngx_event.c) //nginx的真正执行所在，等待数据的到来并进行相应的处理
+	|-->if (ngx_use_accept_mutex) //是否使用accept锁
+		|-->if (ngx_accept_disabled > 0)
+			|-->ngx_accept_disabled--
+		
+		|-->else
+			|-->ngx_trylock_accept_mutex //(ngx_event_accept.c)
+				|-->if (ngx_shmtx_trylock(&ngx_accept_mutex)) //尝试获取accept锁,如果获取到进入该分支
+					|-->if (ngx_accept_mutex_held && ngx_accept_events == 0)
+						|-->return OK
+
+					|-->ngx_enable_accept_events //(ngx_event_accept.c)
+						|-->for (i = 0; i < cycle->listening.nelts; i++)
+							|-->c = ls[i].connection
+							|-->if (c == NULL || c->read->active)
+								continue
+								
+							|-->ngx_add_event(c->read, NGX_READ_EVENT, 0) //(ngx_event.h)
+								|-->ngx_event_actions.add //使用ngx_event_actions的add回调函数
+									|-->ngx_epoll_add_event //(ngx_epoll_module.c)
+										|-->epoll_ctl //添加事件
+					
+					|-->ngx_accept_events = 0
+					|-->ngx_accept_mutex_held = 1
+					|-->return NGX_OK
+
+			|-->if (ngx_accept_mutex_held) //
+				|-->ngx_disable_accept_events //(ngx_event_accept.c)
+					|-->for (i = 0; i < cycle->listening.nelts; i++)
+						|-->ngx_del_event(c->read, NGX_READ_EVENT, NGX_DISABLE_EVENT) //
+
+				|-->ngx_accept_mutex_held = 0;
+
+			|-->flags |= NGX_POST_EVENTS //对falg进行与处理,后面的步骤需要
+			
+	|-->ngx_process_events //(ngx_event.h)
+		|-->ngx_event_actions.process_events //使用回调函数
+			|-->ngx_epoll_process_events //(ngx_epoll_module.c) 具体的事件处理, 其内部处理流程常见下面的函数梳理
+			
+	|-->ngx_event_process_posted(cycle, &ngx_posted_accept_events) //
+	
+	|--> if (ngx_accept_mutex_held)
+		|-->ngx_shmtx_unlock(&ngx_accept_mutex)
+		
+	|-->ngx_event_process_posted(cycle, &ngx_posted_events)	
+
+	
 |-->ngx_epoll_process_events //(ngx_epoll_module.c) 具体的事件处理, 其内部处理流程常见下面的函数梳理
 	|-->events = epoll_wait(ep, event_list, (int) nevents, timer) //等待数据的到来
 	|-->for (i = 0; i < events; i++)
@@ -1010,4 +1081,14 @@ ngx_os_io_t ngx_os_io = {
 
 
 |-->ngx_http_filter_finalize_request //(ngx_http_special_response.c)
+
+|-->ngx_thread_read //(ngx_files.c)
+	|-->task->handler = ngx_thread_read_handler
+	
+|-->ngx_thread_write_chain_to_file //(ngx_files.c)
+	|-->task->handler = ngx_thread_write_chain_to_file_handler
+	
+	
+|-->ngx_linux_sendfile_thread //(ngx_linux_sendfile_chain.c)
+	|-->task->handler = ngx_linux_sendfile_thread_handler
 
