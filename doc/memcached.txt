@@ -165,6 +165,8 @@ settings.item_size_max > (settings.maxbytes / 2)
             |-->slabclass[i].perslab = settings.slab_page_size / slabclass[i].size
 		
 	|-->memcached_thread_init //(thread.c)
+		|-->pthread_mutex_init(&cqi_freelist_lock, NULL) //初始化list锁
+		|-->cqi_freelist = NULL //初始化为空,这样在获取时将进行分配
 		|-->pipe(fds) //创建管道用于通信
 		|-->threads[i].notify_receive_fd = fds[0] 
 		|-->threads[i].notify_send_fd = fds[1] 
@@ -576,3 +578,23 @@ slab_automove_reg_t slab_automove_default = {
 |-->conn_close //(memcached.c)
 	|-->event_del(&c->event) //调用epoll删除fd
 	|-->conn_cleanup //
+
+|-->cqi_new //(thread.c)
+	|-->pthread_mutex_lock(&cqi_freelist_lock)
+	|-->if (cqi_freelist)
+		|-->item = cqi_freelist
+		|-->cqi_freelist = item->next
+	
+	|-->pthread_mutex_unlock(&cqi_freelist_lock)
+
+	|-->if (NULL == item)
+		|-->item = malloc(sizeof(CQ_ITEM) * ITEMS_PER_ALLOC) //一次性分配ITEMS_PER_ALLOC个,以避免多次分配造成的性能损失
+		|-->for (i = 2; i < ITEMS_PER_ALLOC; i++) //之所以从索引item[1]开始是因为item[0]要分配出去,所以不用初始化
+			|-->item[i - 1].next = &item[i]
+
+		|-->pthread_mutex_lock(&cqi_freelist_lock)
+		|-->item[ITEMS_PER_ALLOC - 1].next = cqi_freelist
+		|-->cqi_freelist = &item[1]
+		|-->pthread_mutex_unlock(&cqi_freelist_lock)
+	
+	|-->return item

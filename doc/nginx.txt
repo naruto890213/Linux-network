@@ -792,6 +792,11 @@ ngx_module_t  ngx_thread_pool_module = {
 |-->ngx_event_process_init //(ngx_event.c)
 	|-->ngx_event_accept //(ngx_event_accept.c)
 
+|-->ngx_http_file_cache_reopen //
+
+|-->ngx_http_upstream_init_request //()
+|-->ngx_http_upstream_cache //
+
 |-->ngx_http_file_cache_open //(ngx_http_file_cache.c)
 	|-->ngx_http_file_cache_read //(ngx_http_file_cache.c)
 		|-->ngx_http_file_cache_aio_read //(ngx_http_file_cache.c)
