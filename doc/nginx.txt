@@ -799,27 +799,13 @@ ngx_module_t  ngx_thread_pool_module = {
 	
 
 |-->ngx_process_events_and_timers //(ngx_event.c) //nginx的真正执行所在，等待数据的到来并进行相应的处理
-	|-->if (ngx_use_accept_mutex) //是否使用accept锁
+	|-->if (ngx_use_accept_mutex) //是否使用accept锁, 默认情况下是不会使用锁的
 		|-->if (ngx_accept_disabled > 0)
 			|-->ngx_accept_disabled--
 		
-		|-->else
-			|-->ngx_trylock_accept_mutex //(ngx_event_accept.c)
-				|-->if (ngx_shmtx_trylock(&ngx_accept_mutex)) //尝试获取accept锁,如果获取到进入该分支
-					|-->if (ngx_accept_mutex_held && ngx_accept_events == 0)
-						|-->return OK
-
-					|-->ngx_enable_accept_events //(ngx_event_accept.c)
-						|-->for (i = 0; i < cycle->listening.nelts; i++)
-							|-->c = ls[i].connection
-							|-->if (c == NULL || c->read->active)
-								continue
-								
-							|-->ngx_add_event(c->read, NGX_READ_EVENT, 0) //函数的实现参见函数分析说明
-					
-					|-->ngx_accept_events = 0
-					|-->ngx_accept_mutex_held = 1
-					|-->return NGX_OK
+		|-->else //ngx_accept_disabled <= 0的情况
+			|-->if(ngx_trylock_accept_mutex == NGX_ERROR ) //获取accept_mutex锁
+				|-->return;
 
 			|-->if (ngx_accept_mutex_held) //
 				|-->ngx_disable_accept_events //(ngx_event_accept.c)
@@ -886,6 +872,29 @@ ngx_module_t  ngx_thread_pool_module = {
 				|-->case "ngx_posted_events": //处理可写事件
 
 
+|-->ngx_trylock_accept_mutex //(ngx_event_accept.c) 获取accept_mutex锁
+	|-->if (ngx_shmtx_trylock(&ngx_accept_mutex)) //尝试获取accept锁,如果获取到进入该分支
+		|-->if (ngx_accept_mutex_held && ngx_accept_events == 0)
+			|-->return OK
+
+		|-->ngx_enable_accept_events //(ngx_event_accept.c)
+			|-->for (i = 0; i < cycle->listening.nelts; i++)
+				|-->c = ls[i].connection
+				|-->if (c == NULL || c->read->active)
+					continue
+					
+				|-->ngx_add_event(c->read, NGX_READ_EVENT, 0) //函数的实现参见函数分析说明
+		
+		|-->ngx_accept_events = 0
+		|-->ngx_accept_mutex_held = 1
+		|-->return NGX_OK
+
+	|-->if (ngx_accept_mutex_held)
+		|-->ngx_disable_accept_events
+		|-->ngx_accept_mutex_held = 0
+
+	|-->return NGX_OK
+
 |-->ngx_epoll_eventfd_handler //(ngx_epoll_module.c)
 	|-->epoll_ctl
 	
@@ -920,6 +929,13 @@ ngx_module_t  ngx_thread_pool_module = {
 		
 
 |-->ngx_event_process_init //(ngx_event.c) event模块的初始化函数,根据不同的分类进行子模块的初始化工作和一些绑定关系的设置
+	|-->if(ccf->master && ccf->worker_processes > 1 && ecf->accept_mutex) //ecf->accept_mutex默认为0不会进入该分支
+		|-->ngx_use_accept_mutex = 1
+		|-->ngx_accept_mutex_held = 0
+		|-->ngx_accept_mutex_delay = ecf->accept_mutex_delay
+	|-->else //默认配置下进入该分支
+		|-->ngx_use_accept_mutex = 0 //默认情况下该值为0,在后面需要用到
+	
 	|-->ngx_queue_init(&ngx_posted_accept_events) //初始化链表,在后续的处理中需要用到,用来处理read事件
 	|-->ngx_queue_init(&ngx_posted_events) //初始化链表,用来处理write事件
 	|-->for (m = 0; cycle->modules[m]; m++)
@@ -1241,9 +1257,12 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 |-->ngx_linux_sendfile_thread //(ngx_linux_sendfile_chain.c)
 	|-->task->handler = ngx_linux_sendfile_thread_handler
 
+|-->ngx_close_accepted_connection //(ngx_event_accept.c)
+	|-->ngx_free_connection //(ngx_connection.c)
 
-|-->ngx_close_connection //(ngx_connection.c)
-	|-->ngx_free_connection //(ngx_connection.c) //将要释放的指针插入free_connections的头部
-		|-->c->data = ngx_cycle->free_connections 
-		|-->ngx_cycle->free_connections = c
-		|-->ngx_cycle->free_connection_n++
+|-->ngx_http_close_connection //(ngx_http_request.c) 关闭连接,用于释放connection节点
+	|-->ngx_close_connection //(ngx_connection.c)
+		|-->ngx_free_connection //(ngx_connection.c) //将要释放的指针插入free_connections的头部
+			|-->c->data = ngx_cycle->free_connections 
+			|-->ngx_cycle->free_connections = c
+			|-->ngx_cycle->free_connection_n++
