@@ -360,6 +360,22 @@ ngx_module_t  ngx_thread_pool_module = {
     NGX_MODULE_V1_PADDING
 }; 
 
+ngx_module_t  ngx_http_upstream_module = {
+    NGX_MODULE_V1,
+    &ngx_http_upstream_module_ctx,         /* module context */
+    ngx_http_upstream_commands,            /* module directives */
+    NGX_HTTP_MODULE,                       /* module type */
+    NULL,                                  /* init master */
+    NULL,                                  /* init module */
+    NULL,                                  /* init process */
+    NULL,                                  /* init thread */
+    NULL,                                  /* exit thread */
+    NULL,                                  /* exit process */
+    NULL,                                  /* exit master */
+    NGX_MODULE_V1_PADDING
+};//(ngx_http_upstream.c)负载均衡模块
+
+
 |-->main //(nginx.c) nginx函数入口
 	|-->ngx_max_sockets = -1 
 	|-->ngx_time_init //
@@ -1266,3 +1282,24 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 			|-->c->data = ngx_cycle->free_connections 
 			|-->ngx_cycle->free_connections = c
 			|-->ngx_cycle->free_connection_n++
+
+|-->ngx_http_upstream //(ngx_http_upstream.c) 配置文件中"upstream"字段处理函数
+	|-->ngx_http_upstream_add //(ngx_http_upstream.c)
+		|-->
+	
+	|-->ctx = ngx_pcalloc 
+	|-->ctx->srv_conf = ngx_pcalloc
+	|-->ctx->loc_conf = ngx_pcalloc
+	|-->for (m = 0; cf->cycle->modules[m]; m++)
+		|-->if (module->create_srv_conf)
+			|-->module->create_srv_conf(cf)
+				|-->
+			
+		|-->if (module->create_loc_conf)
+			|-->mconf = module->create_loc_conf(cf)
+			
+	|-->ngx_conf_parse
+	
+|-->ngx_http_upstream_server //(ngx_http_upstream.c) 处理配置文件中"upstream"的子项里面的"server"
+	|-->for (i = 2; i < cf->args->nelts; i++)
+		|-->
