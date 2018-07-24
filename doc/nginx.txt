@@ -344,6 +344,35 @@ ngx_os_io_t ngx_os_io = {
     0
 };//(ngx_posix_init.c) linux系统下的默认socket操作函数组
 
+static ngx_http_module_t  ngx_http_core_module_ctx = {
+    ngx_http_core_preconfiguration,        /* preconfiguration */
+    ngx_http_core_postconfiguration,       /* postconfiguration */
+
+    ngx_http_core_create_main_conf,        /* create main configuration */
+    ngx_http_core_init_main_conf,          /* init main configuration */
+
+    ngx_http_core_create_srv_conf,         /* create server configuration */
+    ngx_http_core_merge_srv_conf,          /* merge server configuration */
+
+    ngx_http_core_create_loc_conf,         /* create location configuration */
+    ngx_http_core_merge_loc_conf           /* merge location configuration */
+};//(ngx_http_core_module.c) http模块的配置处理函数
+
+ngx_module_t  ngx_http_core_module = {
+    NGX_MODULE_V1,
+    &ngx_http_core_module_ctx,             /* module context */
+    ngx_http_core_commands,                /* module directives */
+    NGX_HTTP_MODULE,                       /* module type */
+    NULL,                                  /* init master */
+    NULL,                                  /* init module */
+    NULL,                                  /* init process */
+    NULL,                                  /* init thread */
+    NULL,                                  /* exit thread */
+    NULL,                                  /* exit process */
+    NULL,                                  /* exit master */
+    NGX_MODULE_V1_PADDING
+};//(ngx_http_core_module.c) http的核心处理模块
+
 //ngx_thread_pool_module 线程池模块 //(ngx_thread_pool.c) 默认是不启用的，需要在configure时进行配置--with-threads进行开启
 ngx_module_t  ngx_thread_pool_module = {
     NGX_MODULE_V1,
@@ -701,6 +730,11 @@ ngx_module_t  ngx_http_upstream_module = {
 						|-->ngx_http_core_listen //(ngx_http_core_module.c)
 
 |-->ngx_http_block //(ngx_http.c)
+	|-->ngx_http_max_module = ngx_count_modules //获取模块中type为NGX_HTTP_MODULE的个数
+	|-->ctx->main_conf = ngx_pcalloc //预分配ngx_http_max_module个void型的指针数据
+	|-->ctx->srv_conf = ngx_pcalloc //预分配ngx_http_max_module个void型的指针数据
+	|-->ctx->loc_conf = ngx_pcalloc 
+	
 	|-->for (m = 0; cf->cycle->modules[m]; m++) //进行轮训
 		|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
 			|-->continue
@@ -709,13 +743,22 @@ ngx_module_t  ngx_http_upstream_module = {
 		|-->mi = cf->cycle->modules[m]->ctx_index
 		
 		|-->if (module->create_main_conf)
-			|-->ctx->main_conf[mi] = module->create_main_conf //
+			|-->ctx->main_conf[mi] = module->create_main_conf() //调用回调函数
+				|-->case ngx_http_core_module:
+					|-->ngx_http_core_create_main_conf //(ngx_http_core_module.c)
+					
+				|-->case ngx_http_upstream_module:
+					|-->ngx_http_upstream_create_main_conf //(ngx_http_upstream.c)
+					
 			
 		|-->if (module->create_srv_conf)
-			|-->ctx->srv_conf[mi] = module->create_srv_conf //
+			|-->ctx->srv_conf[mi] = module->create_srv_conf //调用回调函数
+				|-->case ngx_http_core_module:
+					|-->ngx_http_core_create_srv_conf //(ngx_http_core_module.c)
+						|-->
 			
 		|-->if (module->create_loc_conf)
-			|-->ctx->loc_conf[mi] = module->create_loc_conf //
+			|-->ctx->loc_conf[mi] = module->create_loc_conf //调用回调函数
 			
 	|-->for (m = 0; cf->cycle->modules[m]; m++) //进行轮训
 		|-->if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE)
@@ -724,7 +767,7 @@ ngx_module_t  ngx_http_upstream_module = {
 		|-->module = cf->cycle->modules[m]->ctx
 		
 		|-->if (module->preconfiguration)
-			|-->module->preconfiguration //
+			|-->module->preconfiguration //调用回调函数
 			
 	|-->ngx_conf_parse //解析文件内容
 	
@@ -735,7 +778,13 @@ ngx_module_t  ngx_http_upstream_module = {
 		|-->module = cf->cycle->modules[m]->ctx
 		
 		|-->if (module->init_main_conf)
-			|-->module->init_main_conf //
+			|-->module->init_main_conf //调用回调函数
+				|-->case ngx_http_upstream_module:
+					|-->ngx_http_upstream_init_main_conf //(ngx_http_upstream.c)
+						|-->for (i = 0; i < umcf->upstreams.nelts; i++)
+							|-->init() //调用init初始化函数，默认情况下为 ngx_http_upstream_init_round_robin
+								|-->ngx_http_upstream_init_round_robin //(ngx_http_upstream_round_robin.c)
+									|-->
 			
 		|-->ngx_http_merge_servers //
 		
