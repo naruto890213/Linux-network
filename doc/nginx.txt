@@ -1177,7 +1177,53 @@ ngx_module_t  ngx_http_upstream_module = {
 
 				|-->return 
 
-|-->ngx_http_upstream_init //()
+|-->ngx_http_upstream_init //(ngx_http_upstream.c)
+	|-->ngx_http_upstream_init_request //(ngx_http_upstream.c)
+		|-->ngx_http_upstream_cache
+		|-->r->write_event_handler = ngx_http_request_empty_handler
+		|-->ngx_http_upstream_cache_send
+		|-->ngx_http_upstream_cache_background_update
+		|-->u->create_request() //回调函数
+		|-->ngx_http_upstream_set_local //
+		|-->ngx_http_cleanup_add
+		|-->cln->handler = ngx_http_upstream_cleanup
+		|-->if (u->resolved->sockaddr)
+			|-->ngx_http_upstream_create_round_robin_peer //
+			|-->ngx_http_upstream_connect //
+			|-->return
+
+		|-->ngx_resolve_start
+		|-->ctx->handler = ngx_http_upstream_resolve_handler
+		|-->ngx_resolve_name //(ngx_resolver.c)
+			|-->ngx_resolve_name_locked //(ngx_resolver.c)
+				|-->ctx->handler() //回调函数
+					|-->ngx_http_upstream_resolve_handler //(ngx_http_upstream.c)
+						|-->ngx_http_upstream_create_round_robin_peer //
+						|-->ngx_resolve_name_done //(ngx_resolver.c)
+							|-->ngx_resolver_expire //()
+
+						|-->ngx_http_upstream_connect //(ngx_http_upstream.c)
+							|-->ngx_event_connect_peer //(ngx_event_connect.c)
+								|-->ngx_socket
+								|-->ngx_get_connection 
+								|-->ngx_nonblocking
+								|-->connect 
+								|-->ngx_add_event //
+								|-->wev->ready = 1 //
+
+							|-->c->write->handler = ngx_http_upstream_handler
+							|-->c->read->handler = ngx_http_upstream_handler
+							|-->u->write_event_handler = ngx_http_upstream_send_request_handler
+							|-->u->read_event_handler = ngx_http_upstream_process_header
+							|-->ngx_http_upstream_send_request //(ngx_http_upstream.c)
+								|-->ngx_http_upstream_send_request_body //(ngx_http_upstream.c)
+									|-->ngx_http_read_unbuffered_request_body //(ngx_http_request_body.c)
+										|-->ngx_http_do_read_client_request_body //(ngx_http_request_body.c)
+											|-->
+
+								|-->ngx_handle_write_event//
+
+			|-->return
 
 |-->ngx_http_memcached_pass //(ngx_http_memcached_module.c)
 	|-->clcf->handler = ngx_http_memcached_handler
