@@ -267,6 +267,21 @@ ngx_module_t  ngx_http_module = {
     NGX_MODULE_V1_PADDING
 };
 
+ngx_module_t  ngx_stream_module = {
+    NGX_MODULE_V1,
+    &ngx_stream_module_ctx,                /* module context */
+    ngx_stream_commands,                   /* module directives */
+    NGX_CORE_MODULE,                       /* module type */
+    NULL,                                  /* init master */
+    NULL,                                  /* init module */
+    NULL,                                  /* init process */
+    NULL,                                  /* init thread */
+    NULL,                                  /* exit thread */
+    NULL,                                  /* exit process */
+    NULL,                                  /* exit master */
+    NGX_MODULE_V1_PADDING
+};//(ngx_stream.c) tcp/udp 负载均衡模块
+
 
 |-->command指令集 //(ngx_conf_file.h)
 	|-->struct ngx_command_s {
@@ -883,15 +898,22 @@ ngx_module_t  ngx_http_upstream_module = {
 				|-->ngx_accept_mutex_held = 0;
 
 			|-->flags |= NGX_POST_EVENTS //对falg进行与处理,后面的步骤需要
+
+	|-->delta = ngx_current_msec
 			
 	|-->ngx_process_events //(ngx_event.h)
 		|-->ngx_event_actions.process_events //使用回调函数
 			|-->ngx_epoll_process_events //(ngx_epoll_module.c) 具体的事件处理, 其内部处理流程常见下面的函数梳理
+
+	|-->delta = ngx_current_msec - delta
 			
 	|-->ngx_event_process_posted(cycle, &ngx_posted_accept_events)//处理在process_events中插入的数据,其处理流程见下面的分析
 	
 	|-->if (ngx_accept_mutex_held)
 		|-->ngx_shmtx_unlock(&ngx_accept_mutex)
+
+	|-->if (delta)
+		|-->ngx_event_expire_timers //(ngx_event_timer.c)
 		
 	|-->ngx_event_process_posted(cycle, &ngx_posted_events) //处理插入链表中的数据	
 
@@ -962,6 +984,23 @@ ngx_module_t  ngx_http_upstream_module = {
 		|-->ngx_accept_mutex_held = 0
 
 	|-->return NGX_OK
+
+|-->ngx_event_expire_timers //(ngx_event_timer.c)
+	|-->sentinel = ngx_event_timer_rbtree.sentinel
+	|-->for ( ;; )
+		|-->root = ngx_event_timer_rbtree.root
+		|-->if (root == sentinel)
+			|-->return
+
+		|-->node = ngx_rbtree_min(root, sentinel)
+		|-->if ((ngx_msec_int_t) (node->key - ngx_current_msec) > 0)
+			|-->return
+
+		|-->ev = (ngx_event_t *) ((char *) node - offsetof(ngx_event_t, timer))
+		|-->ngx_rbtree_delete(&ngx_event_timer_rbtree, &ev->timer)
+		|-->ev->timer_set = 0
+		|-->ev->timedout = 1
+		|-->ev->handler(ev) //
 
 |-->ngx_epoll_eventfd_handler //(ngx_epoll_module.c)
 	|-->epoll_ctl
@@ -1277,13 +1316,19 @@ ngx_module_t  ngx_http_upstream_module = {
 							|-->ngx_resolver_expire //()
 
 						|-->ngx_http_upstream_connect //(ngx_http_upstream.c)
-							|-->ngx_event_connect_peer //(ngx_event_connect.c)
+							|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器
 								|-->ngx_socket
 								|-->ngx_get_connection 
 								|-->ngx_nonblocking
 								|-->connect 
 								|-->ngx_add_event //
 								|-->wev->ready = 1 //
+
+							|-->if (rc == NGX_BUSY) //如果connect连接失败,且错误码为BUSY
+								|-->ngx_http_upstream_next(r, u, NGX_HTTP_UPSTREAM_FT_NOLIVE)
+
+							|-->if (rc == NGX_DECLINED)
+								|-->ngx_http_upstream_next(r, u, NGX_HTTP_UPSTREAM_FT_ERROR)
 
 							|-->c->write->handler = ngx_http_upstream_handler
 							|-->c->read->handler = ngx_http_upstream_handler
@@ -1488,3 +1533,197 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 |-->ngx_http_upstream_server //(ngx_http_upstream.c) 处理配置文件中"upstream"的子项里面的"server"
 	|-->for (i = 2; i < cf->args->nelts; i++)
 		|-->
+
+
+|-->ngx_stream_block //(ngx_stream.c) nginx.conf文件中stream模块处理方法(与http模块并列)
+	|-->ngx_stream_max_module = ngx_count_modules(cf->cycle, NGX_STREAM_MODULE) //获取stream模块的个数
+	|-->ctx->main_conf = ngx_pcalloc
+	|-->ctx->srv_conf = ngx_pcalloc
+	|-->for (m = 0; cf->cycle->modules[m]; m++)
+		|-->if (cf->cycle->modules[m]->type != NGX_STREAM_MODULE)
+			|-->continue;
+
+		|-->if (module->create_main_conf)
+			|-->ctx->main_conf[mi] = module->create_main_conf() //调用回调函数
+			
+		|-->if (module->create_srv_conf)
+			|-->ctx->srv_conf[mi] = module->create_srv_conf(cf)
+
+	|-->for (m = 0; cf->cycle->modules[m]; m++)
+		|-->if (cf->cycle->modules[m]->type != NGX_STREAM_MODULE)
+			|-->continue;
+
+		|-->if (module->preconfiguration)
+			|-->module->preconfiguration(cf) //
+
+	|-->ngx_conf_parse //
+	|-->for (m = 0; cf->cycle->modules[m]; m++)
+		|-->if (cf->cycle->modules[m]->type != NGX_STREAM_MODULE)
+			|-->continue;
+
+		|-->if (module->init_main_conf)
+			|-->module->init_main_conf()
+
+		|-->for (s = 0; s < cmcf->servers.nelts; s++)
+			|-->if (module->merge_srv_conf)
+				|-->module->merge_srv_conf()
+
+	|-->ngx_stream_init_phases //
+	|-->for (m = 0; cf->cycle->modules[m]; m++)
+		|-->if (cf->cycle->modules[m]->type != NGX_STREAM_MODULE)
+			|-->continue
+
+		|-->if (module->postconfiguration)
+			|-->module->postconfiguration(cf)//
+
+	|-->ngx_stream_variables_init_vars //
+
+	|-->ngx_stream_init_phase_handlers //
+	|-->for (i = 0; i < cmcf->listen.nelts; i++)
+		|-->ngx_stream_add_ports //
+
+	|-->ngx_stream_optimize_servers //(ngx_stream.c)
+
+|-->ngx_stream_init_phase_handlers //(ngx_stream.c)
+	|-->ph = ngx_pcalloc()
+	|-->cmcf->phase_engine.handlers = ph
+	|-->for (i = 0; i < NGX_STREAM_LOG_PHASE; i++)
+		|-->switch (i)
+			|-->case NGX_STREAM_PREREAD_PHASE:
+				|-->checker = ngx_stream_core_preread_phase
+
+			|-->case NGX_STREAM_CONTENT_PHASE:
+				|-->ph->checker = ngx_stream_core_content_phase
+				|-->n++; ph++;
+
+			|-->default:
+				|-->checker = ngx_stream_core_generic_phase
+
+		|-->n += cmcf->phases[i].handlers.nelts
+		|-->for (j = cmcf->phases[i].handlers.nelts - 1; j >= 0; j--)
+			|-->ph->checker = checker
+			|-->ph->handler = h[j]
+			|-->ph->next = n, ph++
+
+|-->ngx_stream_optimize_servers //(ngx_stream.c)
+	|-->for (p = 0; p < ports->nelts; p++)
+		|-->last = port[p].addrs.nelts
+		|-->while(i < last)
+			|-->ngx_create_listening //
+			|-->ls->handler = ngx_stream_init_connection
+			|-->stport = ngx_palloc()
+			|-->ngx_stream_add_addrs //
+			|-->ngx_clone_listening //
+
+|-->ngx_stream_init_connection //(ngx_stream_handler.c)
+	|-->rev->handler = ngx_stream_session_handler
+	|-->if (addr_conf->proxy_protocol)
+		|-->rev->handler = ngx_stream_proxy_protocol_handler
+		
+	|-->if (ngx_use_accept_mutex)
+		|-->ngx_post_event(rev, &ngx_posted_events)
+		|-->return
+
+	|-->rev->handler() //执行回调函数
+		|-->case ngx_stream_proxy_protocol_handler //
+		|-->case ngx_stream_session_handler //(ngx_stream_handler.c)
+			|-->ngx_stream_core_run_phases //(ngx_stream_core_module.c)
+				|-->ph = cmcf->phase_engine.handlers
+				|-->while (ph[s->phase_handler].checker)
+					|-->rc = ph[s->phase_handler].checker(s, &ph[s->phase_handler]) //
+
+|-->ngx_stream_proxy_pass //(ngx_stream_proxy_module.c)
+	|-->cscf->handler = ngx_stream_proxy_handler
+	|-->ngx_stream_compile_complex_value //
+	|-->ngx_stream_upstream_add //
+
+|-->ngx_stream_core_content_phase //(ngx_stream_core_module.c)
+	|-->cscf = ngx_stream_get_module_srv_conf(s, ngx_stream_core_module)
+	|-->cscf->handler(s) //调用回调函数
+		|-->ngx_stream_proxy_handler //(ngx_stream_proxy_module.c)
+
+|-->ngx_stream_proxy_handler //(ngx_stream_proxy_module.c)
+	|-->ngx_stream_proxy_set_local //
+	|-->c->write->handler = ngx_stream_proxy_downstream_handler
+	|-->c->read->handler = ngx_stream_proxy_downstream_handler
+	|-->for (i = 0; i < umcf->upstreams.nelts; i++)
+		|-->if found
+			goto found;
+
+	|-->if (u->resolved->sockaddr)
+		|-->ngx_stream_upstream_create_round_robin_peer //
+		|-->ngx_stream_proxy_connect
+		|-->return
+
+	|-->ctx = ngx_resolve_start //
+	|-->ctx->handler = ngx_stream_proxy_resolve_handler
+	|-->ngx_resolve_name
+	|-->return
+
+found:
+	|-->uscf->peer.init(s, uscf)
+		|-->ngx_stream_upstream_init_round_robin_peer //(ngx_stream_upstream_round_robin.c)
+			|-->s->upstream->peer.get = ngx_stream_upstream_get_round_robin_peer
+			|-->s->upstream->peer.free = ngx_stream_upstream_free_round_robin_peer
+			|-->s->upstream->peer.notify = ngx_stream_upstream_notify_round_robin_peer
+			|-->s->upstream->peer.tries = ngx_stream_upstream_tries(rrp->peers)
+
+	|-->ngx_stream_proxy_connect //
+
+|-->ngx_stream_proxy_connect //(ngx_stream_proxy_module.c)
+	|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器
+	|-->pc->read->handler = ngx_stream_proxy_connect_handler
+	|-->pc->write->handler = ngx_stream_proxy_connect_handler
+	|-->ngx_add_timer(pc->write, pscf->connect_timeout)
+		|-->ngx_event_add_timer //(ngx_event.h)
+			|-->ngx_rbtree_insert(&ngx_event_timer_rbtree, &ev->timer)//(ngx_rbtree.c)
+				|-->tree->insert(*root, node, sentinel)
+				|-->ngx_rbt_black //(ngx_rbtree.h)
+					|-->((node)->color = 0)
+
+|-->ngx_event_timer_init //(ngx_event_timer.c)
+	|-->ngx_rbtree_init(&ngx_event_timer_rbtree, &ngx_event_timer_sentinel,
+                    ngx_rbtree_insert_timer_value)
+		|-->ngx_rbtree_sentinel_init //(ngx_rbtree.h)
+			|-->ngx_rbt_black //()
+
+		|-->(tree)->root = s
+		|-->(tree)->sentinel = s
+		|-->(tree)->insert = i
+
+|-->ngx_stream_upstream //(ngx_stream_upstream.c)
+	|-->module->create_srv_conf()
+	|-->ngx_conf_parse //
+	|-->
+
+|-->ngx_stream_upstream_least_conn //(ngx_stream_upstream_least_conn_module.c)
+	|-->uscf->peer.init_upstream = ngx_stream_upstream_init_least_conn //
+
+|-->ngx_stream_upstream_init_least_conn //(ngx_stream_upstream_least_conn_module.c)
+	|-->ngx_stream_upstream_init_round_robin //()
+	|-->us->peer.init = ngx_stream_upstream_init_least_conn_peer //
+
+|-->ngx_stream_upstream_init_least_conn_peer //(ngx_stream_upstream_least_conn_module.c)
+	|-->ngx_stream_upstream_init_round_robin_peer //
+	|-->s->upstream->peer.get = ngx_stream_upstream_get_least_conn_peer //
+
+|-->ngx_stream_proxy_protocol_handler //(ngx_stream_handler.c)
+	|-->n = recv(c->fd, (char *) buf, sizeof(buf), MSG_PEEK)
+	|-->if (rev->timer_set)
+		|-->ngx_del_timer
+
+	|-->p = ngx_proxy_protocol_read()
+	|-->ngx_stream_session_handler //()
+
+|-->ngx_stream_session_handler //(ngx_stream_handler.c)
+	|-->c = rev->data
+	|-->s = c->data
+	|-->ngx_stream_core_run_phases(s)
+
+|-->ngx_stream_core_preread_phase //(ngx_stream_core_module.c)
+	|-->rc = ph->handler(s) //
+		|-->ngx_stream_limit_conn_handler //()
+
+	|-->ngx_stream_finalize_session //()
+
+|-->ngx_stream_core_generic_phase //()
