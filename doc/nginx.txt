@@ -985,7 +985,7 @@ ngx_module_t  ngx_http_upstream_module = {
 
 	|-->return NGX_OK
 
-|-->ngx_event_expire_timers //(ngx_event_timer.c)
+|-->ngx_event_expire_timers //(ngx_event_timer.c) 时间处理函数
 	|-->sentinel = ngx_event_timer_rbtree.sentinel
 	|-->for ( ;; )
 		|-->root = ngx_event_timer_rbtree.root
@@ -1000,7 +1000,52 @@ ngx_module_t  ngx_http_upstream_module = {
 		|-->ngx_rbtree_delete(&ngx_event_timer_rbtree, &ev->timer)
 		|-->ev->timer_set = 0
 		|-->ev->timedout = 1
-		|-->ev->handler(ev) //
+		|-->ev->handler(ev) //回调函数
+			|-->ngx_stream_proxy_downstream_handler //(ngx_stream_proxy_module.c) 参见上面的流程
+
+|-->ngx_stream_proxy_downstream_handler //(ngx_stream_proxy_module.c)
+	|-->ngx_stream_proxy_process_connection //(ngx_stream_proxy_module.c)
+		|-->if (c->close)
+			|-->ngx_stream_proxy_finalize(s, NGX_STREAM_OK)
+			|-->return
+
+		|-->ngx_stream_proxy_process //(ngx_stream_proxy_module.c)
+
+|-->ngx_stream_proxy_process //(ngx_stream_proxy_module.c)
+	|-->if (from_upstream) //来自负载均衡
+		|-->recv_action = "proxying and reading from upstream"
+		|-->send_action = "proxying and sending to client"
+
+	|-->else //from_upstream为空的情况
+		|-->recv_action = "proxying and reading from client"
+		|-->send_action = "proxying and sending to upstream"
+
+	|-->for ( ;; )
+		|-->if (do_write && dst)
+			|-->if (*out || *busy || dst->buffered)
+				|-->c->log->action = send_action
+				|-->ngx_stream_top_filter(s, *out, from_upstream)//发往对端
+				|-->ngx_chain_update_chains //
+
+		|-->if (size && src->read->ready && !src->read->delayed
+            && !src->read->error) //有可读事件
+			|-->c->log->action = recv_action
+			|-->src->recv(src, b->last, size)
+
+|-->ngx_stream_top_filter //(ngx_stream_write_filter_module.c)
+	|-->ngx_stream_write_filter //(ngx_stream_write_filter_module.c)
+		|-->c->send_chain(c, *out, 0) //调用回调函数
+			|-->ngx_send_chain //(ngx_event.h)
+				|-->ngx_io.send_chain //(ngx_event.h)
+					|-->ngx_writev_chain //(ngx_posix_init.c)
+			
+|-->ngx_writev_chain //(ngx_posix_init.c)
+	|-->for ( ;; )
+		|-->ngx_output_chain_to_iovec //
+		|-->ngx_writev(c, &vec) //(ngx_writev_chain.c)
+			|-->writev(c->fd, vec->iovs, vec->count) // 写入数据
+
+		|-->ngx_chain_update_sent //
 
 |-->ngx_epoll_eventfd_handler //(ngx_epoll_module.c)
 	|-->epoll_ctl
