@@ -400,6 +400,7 @@ csum_err: //数据校验错误
 	|-->TCP_INC_STATS(sock_net(sk), TCP_MIB_INERRS)
 	|-->goto discard
 	
+	
 |-->tcp_rcv_established //(tcp_input.c) 处于established状态的数据接收处理函数
 	|-->tcp_checksum_complete //()
 	|-->tcp_validate_incoming //()
@@ -544,21 +545,21 @@ csum_err: //数据校验错误
 			|-->net_xmit_eval //()
 					
 |-->tcp_rcv_synsent_state_process //(tcp_input.c) 用于处理connect函数的数据接收
-	|-->tcp_parse_options //()
-	|-->if (th->ack) //(tcp_input.c) 接收到的数据中ack为1
-	|-->if (th->rst) 
-		|-->tcp_reset(sk) //(tcp_input.c)
-		|-->tcp_drop //
-		|-->return 0;
-
-	|-->else
+	|-->tcp_parse_options //() 解析tcp option参数
+	|-->if (th->ack) //(tcp_input.c) 接收到的数据中ack为1，正常情况下server回复的数据
+		|-->if (th->rst) //回复的数据中包含rst
+			|-->tcp_reset(sk)
+			|-->goto discard
+			
+		|-->if (!th->syn) //回复的数据中不包含SYN，说明当前的数据为错误数据
+			|-->goto discard_and_undo
+		
 		|-->tcp_ecn_rcv_synack //()
 		|-->tcp_init_wl //()
-		|-->tcp_ack //()
 		|-->tcp_mtup_init //()
 		|-->tcp_sync_mss //()
 		|-->tcp_initialize_rcv_mss //()
-		|-->tcp_finish_connect //(tcp_input.c)
+		|-->tcp_finish_connect //()
 			|-->tcp_set_state(sk, TCP_ESTABLISHED) //(tcp_input.c) 进入ESTABLISHED状态
 			|-->icsk->icsk_af_ops->sk_rx_dst_set //(tcp_input.c)
 				|-->inet_sk_rx_dst_set //(tcp_ipv4.c)
@@ -569,17 +570,32 @@ csum_err: //数据校验错误
 			|-->tcp_call_bpf //()
 			|-->tcp_init_congestion_control //()
 			|-->tcp_init_buffer_space //(tcp_input.c)
-		
+			
+		|-->tcp_rcv_fastopen_synack //()
+			
 		|-->if (!sock_flag(sk, SOCK_DEAD))
 			|-->sk->sk_state_change(sk) //调用epoll反馈数据状态
 			|-->sk_wake_async(sk, SOCK_WAKE_IO, POLL_OUT)//(sock.h)
+	
+	|-->if (th->rst) 
+		|-->goto discard_and_undo
 
-		|-->tcp_rcv_fastopen_synack //()
-		|-->tcp_send_ack //(tcp_output.c) 发送ask，并更新window大小
-			|-->tcp_init_nondata_skb(buff, tcp_acceptable_seq(sk), TCPHDR_ACK) //
-			|-->skb_set_tcp_pure_ack //
-			|-->tcp_transmit_skb //(tcp_output.c)
-			
+	|-->if (th->syn)
+		|-->tcp_set_state(sk, TCP_SYN_RECV)
+		|-->tcp_ecn_rcv_syn //
+		|-->tcp_mtup_init //
+		|-->tcp_sync_mss //
+		|-->tcp_initialize_rcv_mss //
+		|-->tcp_send_synack //()
+		|-->goto discard
+		
+discard_and_undo:
+	|-->tcp_clear_options()
+	|-->goto discard
+	
+reset_and_undo:
+	|-->tcp_clear_options()
+	|-->return 1
 
 |-->connect // 应用层
 	|-->SYSCALL_DEFINE3(connect, int, fd, struct sockaddr __user *, uservaddr, int, addrlen)//(net/socket.c)
@@ -823,10 +839,6 @@ adjudge_to_death:
 		|-->sock_hold //()
 		|-->sock_orphan //()
 		|-->release_sock //()
-
-|-->tcp_rcv_synsent_state_process //(tcp_input.c)
-	|-->if (th->syn)
-		|-->tcp_set_state(sk, TCP_SYN_RECV) //(tcp_input.c)
 
 		
 |-->tcp_check_req //(tcp_minisocks.c)
