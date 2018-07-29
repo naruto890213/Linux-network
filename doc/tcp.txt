@@ -155,7 +155,7 @@ struct tcphdr {
 }; //(include/uapi/linux/tcp.h) tcp数据结构头
 
 |-->tcp_ipv4 协议族的默认定义
-i	|-->struct proto tcp_prot = {
+	|-->struct proto tcp_prot = {
     	.name           = "TCP",
     	.owner          = THIS_MODULE,
     	.close          = tcp_close,
@@ -358,185 +358,228 @@ i	|-->struct proto tcp_prot = {
 
 		|-->tcp_child_process //(tcp_minisocks.c)
 			|-->tcp_rcv_state_process //(tcp_input.c)
-				|-->switch (sk->sk_state) 
-					|-->case TCP_SYN_RECV //在上面的步骤中将状态设置为该状态
-						|-->tcp_set_state(sk, TCP_ESTABLISHED) //(tcp_input.c)
-						|-->sk->sk_state_change(sk) //(tcp_input.c)
-							|-->sock_def_wakeup //(sock.c)
-								|-->wq = rcu_dereference(sk->sk_wq) //这里开始联系上epoll的系统调用，具体参见epoll的原理
-								|-->wake_up_interruptible_all(&wq->wait) //(wait.h)
-									|-->__wake_up //(wait.c)
-										|-->__wake_up_common_lock //(wait.c)
-											|-->__wake_up_common //(wait.c)
-												|-->curr->func //(wait.c)
-													|-->ep_poll_callback //(eventpoll.c) 
 
 	|-->if (sk->sk_state == TCP_LISTEN) listen状态进入的目录
-		|-->ret = tcp_v4_do_rcv(sk, skb) //(tcp_ipv4.c)
-			|-->tcp_checksum_complete //()
-			|-->if (sk->sk_state == TCP_LISTEN)
-				|-->tcp_v4_cookie_check //(tcp_ipv4.c)
-				
-			|-->tcp_rcv_state_process //(tcp_input.c)
-				|-->switch (sk->sk_state)
-					|-->case TCP_LISTEN
-						|-->if (th->syn) //接收connect的第一个数据包
-							|-->icsk->icsk_af_ops->conn_request(sk, skb) //(tcp_input.c)
-								|-->tcp_v4_conn_request //(tcp_ipv4.c)
-									|-->tcp_conn_request(&tcp_request_sock_ops, &tcp_request_sock_ipv4_ops, sk, skb) //(tcp_input.c)
-										|-->if (sk_acceptq_is_full(sk)) //(tcp_input.c)
-												|-->return sk->sk_ack_backlog > sk->sk_max_ack_backlog //(sock.h) 判断ack队列值是否已经超过最大值，该值由listen的第二个参数设置
-												
-											|-->goto drop //
-										
-										|-->inet_reqsk_alloc //(tcp_input.c)
-											|-->ireq->ireq_state = TCP_NEW_SYN_RECV //(tcp_input.c) 将状态设置为TCP_NEW_SYN_RECV, 15年开始使用该状态机替换TCP_SYN_RECV, TCP_SYN_RECV用于fast
-
-										|-->tcp_parse_options //(tcp_input.c)
-										|-->tcp_openreq_init //(tcp_input.c) 初始化变量
-										|-->af_ops->init_req(req, sk, skb) //(tcp_input.c)
-											|-->tcp_v4_init_req //(tcp_ipv4.c)
-												|-->
-										
-										|-->af_ops->init_ts_off //(tcp_input.c)
-										|-->af_ops->route_req(sk, &fl, req) //()
-										|-->tcp_ecn_create_request //()
-										|-->tcp_openreq_init_rwin //()
-										|-->inet_csk_reqsk_queue_hash_add(sk, req, tcp_timeout_init((struct sock *)req))
-											|-->reqsk_queue_hash_req(req, timeout) //(inet_connection_sock.c)
-												|-->setup_pinned_timer(&req->rsk_timer, reqsk_timer_handler, (unsigned long)req)
-													|-->reqsk_timer_handler //(inet_connection_sock.c)
-														|-->req->rsk_ops->syn_ack_timeout //(inet_connection_sock.c)
-															|-->tcp_syn_ack_timeout //(tcp_timer.c)
-
-											|-->inet_csk_reqsk_queue_added //()
-
-										|-->af_ops->send_synack //(tcp_input.c)
-											|-->tcp_v4_send_synack //(tcp_ipv4.c)
-												|-->inet_csk_route_req //()
-												|-->tcp_make_synack //(tcp_output.c) 准备SYN-ACK数据包
-													|-->th->syn = 1 //(tcp_output.c)
-													|-->th->ack = 1 //(tcp_output.c)
-												
-												|-->__tcp_v4_send_check //()
-												|-->ip_build_and_send_pkt //(ip_output.c)
-													|-->ip_local_out //(ip_output.c)
-														|-->__ip_local_out //()
-														|-->dst_output //() 将数据发送出去
-
-												|-->net_xmit_eval //()
-		
-		|-->return ret //(tcp_ipv4.c)
+		|-->return tcp_v4_do_rcv(sk, skb) //(tcp_ipv4.c)
 	
 	|-->sk_incoming_cpu_update //()
 	|-->tcp_segs_in //()
 	|-->sock_owned_by_user //()
-	|-->tcp_v4_do_rcv //(tcp_ipv4.c)
-		|-->if (sk->sk_state == TCP_ESTABLISHED)
-			|-->sock_rps_save_rxhash //()
-			|-->sk_mark_napi_id //()
-			|-->tcp_rcv_established //(tcp_input.c)
-				|-->tcp_checksum_complete //()
-				|-->tcp_validate_incoming //()
-				|-->tcp_rcv_rtt_measure_ts //()
-				|-->tcp_urg //()
-				|-->tcp_data_queue //(tcp_input.c)
-					|-->tcp_ecn_accept_cwr //()
-					|-->tcp_queue_rcv //()
-					|-->tcp_rcv_nxt_update //()
-					|-->tcp_event_data_recv //()
-					|-->if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN) //(tcp_input.c)
-						|-->tcp_fin //(tcp_input.c) 当接收到主动关闭方的发送的数据包时调用该函数
-							|-->sock_set_flag(sk, SOCK_DONE) //(tcp_input.c)
-
-							|-->switch (sk->sk_state)
-								|-->case TCP_SYN_RECV:
-								|-->case TCP_ESTABLISHED:
-									|-->tcp_set_state(sk, TCP_CLOSE_WAIT)
-
-								|-->case TCP_FIN_WAIT1:
-									|-->tcp_send_ack(sk) //
-									|-->tcp_set_state(sk, TCP_CLOSING) //()
-
-								|-->case TCP_FIN_WAIT2:
-									|-->tcp_send_ack //()
-									|-->tcp_time_wait(sk, TCP_TIME_WAIT, 0) //()
-
-							|-->sk->sk_state_change//()参考epoll调用
-
-					|-->tcp_fast_path_check //()
-
-				|-->tcp_data_snd_check //(tcp_input.c)
-					|-->tcp_push_pending_frames //()
-					|-->tcp_check_space //()
-
-				|-->tcp_ack_snd_check //tcp_input.c()
-					|-->__tcp_ack_snd_check //(tcp_input.c)
-						|-->tcp_send_ack //()
-
-			|-->return 0;//
-
-		|-->sock_rps_save_rxhash //()
-		|-->tcp_rcv_state_process //(tcp_input.c)
-			|-->switch(sk->sk_state)
-				|-->case TCP_SYN_SENT //(tcp_input.c) socket接收到listen返回的ack+syn后的状态
-					|-->tcp_mstamp_refresh //()
-					|-->tcp_rcv_synsent_state_process //(tcp_input.c)
-						|-->tcp_parse_options //()
-						|-->if (th->ack) //(tcp_input.c) 接收到的数据中ack为1
-							|-->if (th->rst) 
-								|-->tcp_reset(sk) //(tcp_input.c)
-								|-->tcp_drop //
-								|-->return 0;
-							
-							|-->else
-								|-->tcp_ecn_rcv_synack //()
-								|-->tcp_init_wl //()
-								|-->tcp_ack //()
-								|-->tcp_mtup_init //()
-								|-->tcp_sync_mss //()
-								|-->tcp_initialize_rcv_mss //()
-								|-->tcp_finish_connect //(tcp_input.c)
-									|-->tcp_set_state(sk, TCP_ESTABLISHED) //(tcp_input.c) 进入ESTABLISHED状态
-									|-->icsk->icsk_af_ops->sk_rx_dst_set //(tcp_input.c)
-										|-->inet_sk_rx_dst_set //(tcp_ipv4.c)
-
-									|-->security_inet_conn_established //()
-									|-->icsk->icsk_af_ops->rebuild_header //()
-									|-->tcp_init_metrics //()
-									|-->tcp_call_bpf //()
-									|-->tcp_init_congestion_control //()
-									|-->tcp_init_buffer_space //()
-
-								|-->tcp_rcv_fastopen_synack //()
-								|-->tcp_send_ack //(tcp_output.c) 发送ask，并更新window大小
-									|-->tcp_init_nondata_skb(buff, tcp_acceptable_seq(sk), TCPHDR_ACK) //
-									|-->skb_set_tcp_pure_ack //
-									|-->tcp_transmit_skb //(tcp_output.c)
-
-				|-->case case TCP_FIN_WAIT1 //(tcp_input.c)
-					|-->tcp_set_state(sk, TCP_FIN_WAIT2) //
-					|-->sk->sk_shutdown |= SEND_SHUTDOWN //
-					|-->sk->sk_state_change() //()
-					|-->tcp_time_wait(sk, TCP_FIN_WAIT2, tmo) //(tcp_minisocks.c)
-						|-->
-
-				|-->case TCP_CLOSING //
-					|-->tcp_time_wait(sk, TCP_TIME_WAIT, 0) //
-
-				|-->case TCP_LAST_ACK//
-					|-->tcp_update_metrics //()
-					|-->tcp_done //(tcp.c)
-						|-->tcp_set_state(sk, TCP_CLOSE) //
-						|-->sk->sk_shutdown = SHUTDOWN_MASK //
-						|-->if (!sock_flag(sk, SOCK_DEAD))
-							|-->sk->sk_state_change //(tcp.c)
-
+	|-->tcp_v4_do_rcv //(tcp_ipv4.c) tcp的数据接收处理
 	|-->tcp_add_backlog //(tcp_ipv4.c)
 		|-->sk_add_backlog //(sock.h)
 			|-->sk_rcvqueues_full //()
 			|-->__sk_add_backlog //()
+		
+|-->tcp_v4_do_rcv //(tcp_ipv4.c) tcp的数据接收处理函数
+	|-->if (sk->sk_state == TCP_ESTABLISHED) 已经处于ESTABLISHED状态的数据接收处理
+		|-->sock_rps_save_rxhash //()
+		|-->sk_mark_napi_id //()
+		|-->tcp_rcv_established //(tcp_input.c)
+		|-->return 0;//	该状态处理完成后退出函数
+		
+	|-->tcp_checksum_complete //()
+	
+	|-->if (sk->sk_state == TCP_LISTEN)
+		|-->tcp_v4_cookie_check //(tcp_ipv4.c)
+	|-->else //	sk->sk_state不为TCP_LISTEN状态	
+		|-->sock_rps_save_rxhash //()
+		
+	|-->tcp_rcv_state_process //(tcp_input.c) 数据状态处理函数
+	|-->return 0 //退出函数
+	
+reset://重置分支
+	|-->tcp_v4_send_reset //
+	
+discard:
+	|-->kfree_skb //
+	|-->return 0
+	
+csum_err: //数据校验错误
+	|-->TCP_INC_STATS(sock_net(sk), TCP_MIB_CSUMERRORS)
+	|-->TCP_INC_STATS(sock_net(sk), TCP_MIB_INERRS)
+	|-->goto discard
+	
+|-->tcp_rcv_established //(tcp_input.c) 处于established状态的数据接收处理函数
+	|-->tcp_checksum_complete //()
+	|-->tcp_validate_incoming //()
+	|-->tcp_rcv_rtt_measure_ts //()
+	|-->tcp_urg //()
+	|-->tcp_data_queue //(tcp_input.c)
+		|-->tcp_ecn_accept_cwr //()
+		|-->tcp_queue_rcv //()
+		|-->tcp_rcv_nxt_update //()
+		|-->tcp_event_data_recv //()
+		|-->if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN) //(tcp_input.c)
+			|-->tcp_fin //(tcp_input.c) 当接收到主动关闭方的发送的数据包时调用该函数
+				|-->sock_set_flag(sk, SOCK_DONE) //(tcp_input.c)
 
+				|-->switch (sk->sk_state)
+					|-->case TCP_SYN_RECV:
+					|-->case TCP_ESTABLISHED:
+						|-->tcp_set_state(sk, TCP_CLOSE_WAIT)
+
+					|-->case TCP_FIN_WAIT1:
+						|-->tcp_send_ack(sk) //
+						|-->tcp_set_state(sk, TCP_CLOSING) //()
+
+					|-->case TCP_FIN_WAIT2:
+						|-->tcp_send_ack //()
+						|-->tcp_time_wait(sk, TCP_TIME_WAIT, 0) //()
+
+				|-->sk->sk_state_change//()参考epoll调用
+
+		|-->tcp_fast_path_check //()
+
+	|-->tcp_data_snd_check //(tcp_input.c)
+		|-->tcp_push_pending_frames //()
+		|-->tcp_check_space //()
+
+	|-->tcp_ack_snd_check //tcp_input.c()
+		|-->__tcp_ack_snd_check //(tcp_input.c)
+			|-->tcp_send_ack //()
+		
+|-->tcp_rcv_state_process //(tcp_input.c)
+	|-->switch(sk->sk_state) tcp的状态机
+		|-->case TCP_CLOSE //tcp关闭处理
+			|-->goto discard
+		
+		|-->case TCP_LISTEN //listen状态处理分支
+			|-->if (th->syn) //接收connect的第一个数据包
+				|-->icsk->icsk_af_ops->conn_request(sk, skb) //(tcp_input.c)
+					|-->tcp_v4_conn_request //(tcp_ipv4.c) 处理connect发送过来的数据
+					
+				|-->consume_skb //数据校验
+				|-->return 0 //退出函数
+
+		|-->case TCP_SYN_SENT //(tcp_input.c) socket接收到listen返回的ack+syn后的状态 connect的返回结果
+			|-->tcp_mstamp_refresh //()
+			|-->tcp_rcv_synsent_state_process //(tcp_input.c)		
+			|-->return //退出函数
+
+	|-->tcp_mstamp_refresh //
+	|-->tcp_validate_incoming //
+	|-->tcp_ack(sk, skb, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT |FLAG_NO_CHALLENGE_ACK) //ack数据校验
+	
+	|-->switch (sk->sk_state)
+		|-->case TCP_SYN_RECV //
+			|-->tcp_set_state(sk, TCP_ESTABLISHED) //(tcp_input.c)
+			|-->sk->sk_state_change(sk) //(tcp_input.c)
+			
+		|-->case case TCP_FIN_WAIT1 //(tcp_input.c)
+			|-->tcp_set_state(sk, TCP_FIN_WAIT2) //
+			|-->sk->sk_shutdown |= SEND_SHUTDOWN //
+			|-->sk->sk_state_change() //()
+			|-->tcp_time_wait(sk, TCP_FIN_WAIT2, tmo) //(tcp_minisocks.c)
+
+		|-->case TCP_CLOSING //
+			|-->tcp_time_wait(sk, TCP_TIME_WAIT, 0) //
+
+		|-->case TCP_LAST_ACK//
+			|-->tcp_update_metrics //()
+			|-->tcp_done //(tcp.c)
+				|-->tcp_set_state(sk, TCP_CLOSE) //
+				|-->sk->sk_shutdown = SHUTDOWN_MASK //
+				|-->if (!sock_flag(sk, SOCK_DEAD))
+					|-->sk->sk_state_change //(tcp.c)
+					
+	|-->tcp_urg(sk, skb, th) //
+	
+	|-->switch (sk->sk_state)
+		|-->case TCP_CLOSE_WAIT
+		|-->case TCP_CLOSING
+		|-->case TCP_LAST_ACK
+		|-->case TCP_FIN_WAIT1
+		|-->case TCP_FIN_WAIT2
+		|-->case TCP_ESTABLISHED
+
+	|-->if (sk->sk_state != TCP_CLOSE)
+		|-->tcp_data_snd_check
+		|-->tcp_ack_snd_check
+		
+	|-->return //函数完结
+		
+|-->tcp_v4_conn_request //(tcp_ipv4.c) connect的响应处理函数
+	|-->tcp_conn_request(&tcp_request_sock_ops, &tcp_request_sock_ipv4_ops, sk, skb) //(tcp_input.c)
+	|-->if (sk_acceptq_is_full(sk)) //(tcp_input.c)
+			|-->return sk->sk_ack_backlog > sk->sk_max_ack_backlog //(sock.h) 判断ack队列值是否已经超过最大值，该值由listen的第二个参数设置
+			
+		|-->goto drop //
+
+	|-->inet_reqsk_alloc //(tcp_input.c)
+		|-->ireq->ireq_state = TCP_NEW_SYN_RECV //(tcp_input.c) 将状态设置为TCP_NEW_SYN_RECV, 15年开始使用该状态机替换TCP_SYN_RECV, TCP_SYN_RECV用于fast
+
+	|-->tcp_parse_options //(tcp_input.c)
+	|-->tcp_openreq_init //(tcp_input.c) 初始化变量
+	|-->af_ops->init_req(req, sk, skb) //(tcp_input.c)
+		|-->tcp_v4_init_req //(tcp_ipv4.c)
+			|-->
+
+	|-->af_ops->init_ts_off //(tcp_input.c)
+	|-->af_ops->route_req(sk, &fl, req) //()
+	|-->tcp_ecn_create_request //()
+	|-->tcp_openreq_init_rwin //()
+	|-->inet_csk_reqsk_queue_hash_add(sk, req, tcp_timeout_init((struct sock *)req))
+		|-->reqsk_queue_hash_req(req, timeout) //(inet_connection_sock.c)
+			|-->setup_pinned_timer(&req->rsk_timer, reqsk_timer_handler, (unsigned long)req)
+				|-->reqsk_timer_handler //(inet_connection_sock.c)
+					|-->req->rsk_ops->syn_ack_timeout //(inet_connection_sock.c)
+						|-->tcp_syn_ack_timeout //(tcp_timer.c)
+
+		|-->inet_csk_reqsk_queue_added //()
+
+	|-->af_ops->send_synack //(tcp_input.c)
+		|-->tcp_v4_send_synack //(tcp_ipv4.c)
+			|-->inet_csk_route_req //()
+			|-->tcp_make_synack //(tcp_output.c) 准备SYN-ACK数据包
+				|-->th->syn = 1 //(tcp_output.c)
+				|-->th->ack = 1 //(tcp_output.c)
+			
+			|-->__tcp_v4_send_check //()
+			|-->ip_build_and_send_pkt //(ip_output.c)
+				|-->ip_local_out //(ip_output.c)
+					|-->__ip_local_out //()
+					|-->dst_output //() 将数据发送出去
+
+			|-->net_xmit_eval //()
+					
+|-->tcp_rcv_synsent_state_process //(tcp_input.c) 用于处理connect函数的数据接收
+	|-->tcp_parse_options //()
+	|-->if (th->ack) //(tcp_input.c) 接收到的数据中ack为1
+	|-->if (th->rst) 
+		|-->tcp_reset(sk) //(tcp_input.c)
+		|-->tcp_drop //
+		|-->return 0;
+
+	|-->else
+		|-->tcp_ecn_rcv_synack //()
+		|-->tcp_init_wl //()
+		|-->tcp_ack //()
+		|-->tcp_mtup_init //()
+		|-->tcp_sync_mss //()
+		|-->tcp_initialize_rcv_mss //()
+		|-->tcp_finish_connect //(tcp_input.c)
+			|-->tcp_set_state(sk, TCP_ESTABLISHED) //(tcp_input.c) 进入ESTABLISHED状态
+			|-->icsk->icsk_af_ops->sk_rx_dst_set //(tcp_input.c)
+				|-->inet_sk_rx_dst_set //(tcp_ipv4.c)
+
+			|-->security_inet_conn_established //()
+			|-->icsk->icsk_af_ops->rebuild_header //()
+			|-->tcp_init_metrics //()
+			|-->tcp_call_bpf //()
+			|-->tcp_init_congestion_control //()
+			|-->tcp_init_buffer_space //(tcp_input.c)
+		
+		|-->if (!sock_flag(sk, SOCK_DEAD))
+			|-->sk->sk_state_change(sk) //调用epoll反馈数据状态
+			|-->sk_wake_async(sk, SOCK_WAKE_IO, POLL_OUT)//(sock.h)
+
+		|-->tcp_rcv_fastopen_synack //()
+		|-->tcp_send_ack //(tcp_output.c) 发送ask，并更新window大小
+			|-->tcp_init_nondata_skb(buff, tcp_acceptable_seq(sk), TCPHDR_ACK) //
+			|-->skb_set_tcp_pure_ack //
+			|-->tcp_transmit_skb //(tcp_output.c)
+			
 
 |-->connect // 应用层
 	|-->SYSCALL_DEFINE3(connect, int, fd, struct sockaddr __user *, uservaddr, int, addrlen)//(net/socket.c)
@@ -546,70 +589,71 @@ i	|-->struct proto tcp_prot = {
 					|-->switch(sock->state)
 						|-->case SS_UNCONNECTED //初始状态为该状态
 							|-->sk->sk_prot->connect //(af_inet.c)
-								|-->tcp_v4_connect //(tcp_ipv4.c)
-									|-->ip_route_connect //()
-									|-->sk_rcv_saddr_set //()
-									|-->sk_daddr_set //()
-									|-->tcp_set_state(sk, TCP_SYN_SENT) //(net/ipv4/tcp.c) 设置sk的状态为TCP_SYN_SENT
-									|-->inet_hash_connect //(inet_hashtables.c)
-										|-->__inet_check_established //(inet_hashtables.c)
-											|-->twsk_unique //(timewait_sock.h)
-												|-->if (sk->sk_prot->twsk_prot->twsk_unique != NULL)
-													|-->sk->sk_prot->twsk_prot->twsk_unique //(timewait_sock.h) 调用的实际函数为tcp_twsk_unique
-														|-->tcp_twsk_unique //(tcp_ipv4.c)
-															|-->init_net.ipv4.sysctl_tcp_tw_reuse //(/proc/sys/net/ipv4/tcp_tw_reuse) 如果该变量开启后会将time_wait重用, 该值只使用于client端
-					
-									|-->sk_set_txhash //()
-									|-->ip_route_newports //()
-									|-->tp->write_seq = secure_tcp_seq(inet->inet_saddr,
-                               											inet->inet_daddr,
-                               											inet->inet_sport,
-                               											usin->sin_port) //(tcp_ipv4.c) 计算seq的初始化值,根据源端口，目的端口，源ip地址，目的ip地址进行的hash算法
-											|-->net_secret_init //()
-											|-->hash = siphash_3u32((__force u32)saddr, (__force u32)daddr,
-                								(__force u32)sport << 16 | (__force u32)dport, &net_secret) //(secure_seq.c) 将源端口左移16到高位，目的端口为低16位
-											|-->seq_scale(hash) //(secure_seq.c)
-												|-->return seq + (ktime_get_real_ns() >> 6) //(secure_seq.c) 是一个计时器，这个计时器每隔4毫秒加1, 加上之前hash的结果值等于seq的初始化值
-
-									|-->tp->tsoffset = secure_tcp_ts_off(sock_net(sk),
-                         												inet->inet_saddr,
-                         												inet->inet_daddr) //(tcp_ipv4.c)
-
-									|-->tcp_connect //(tcp_output.c) Build a SYN and send it off 
-										|-->tcp_connect_init //(tcp_output.c)
-											|-->
-
-										|-->tcp_init_nondata_skb(buff, tp->write_seq++, TCPHDR_SYN) //(tcp_output.c) 设置tcp_flags为SYN，为传输构造函数做准备
-										|-->tcp_mstamp_refresh //()													
-										|-->tp->retrans_stamp = tcp_time_stamp(tp) //								
-										|-->tcp_connect_queue_skb //(tcp_output.c)									
-																													
-										|-->tcp_ecn_send_syn //(tcp_output.c)										
-											|-->																	
-																													
-										|-->tp->fastopen_req ? tcp_send_syn_data(sk, buff) :						
-       											tcp_transmit_skb(sk, buff, 1, sk->sk_allocation)//(tcp_output.c)	
-											|-->case tcp_send_syn_data //(tcp_output.c)								
-												|-->TCP_SKB_CB(syn_data)->tcp_flags = TCPHDR_ACK | TCPHDR_PSH // (tcp_output.c) (设置flags)
-												|-->tcp_transmit_skb //(tcp_output.c)								
-													|-->if (unlikely(tcb->tcp_flags & TCPHDR_SYN)) //(tcp_output.c)
-														|-->tcp_syn_options //(tcp_output.c)
-															|-->
-													
-													|-->else
-														|-->tcp_established_options //
-													
-											|-->case tcp_transmit_skb //(tcp_output.c)
-												|-->*(((__be16 *)th) + 6) = htons(((tcp_header_size >> 2) << 12) | tcb->tcp_flags) //(tcp_output.c) 为tcp头赋值，并使用tcp_flags表示flag，如果为connect，则该值为TCPHDR_SYN(0x02) 即数据包中包含SYN
-												|-->icsk->icsk_af_ops->queue_xmit //(tcp_output.c)
-													|-->ip_queue_xmit //()
-							
-										|-->inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, inet_csk(sk)->icsk_rto, TCP_RTO_MAX)//(inet_connection_sock.h)设置timer，用于接收server的ACK_SYN返回值
-											|-->sk_reset_timer(sk, &icsk->icsk_retransmit_timer, icsk->icsk_timeout) //设置定时器，用于重传SYN数据包
-
+								|-->tcp_v4_connect //(tcp_ipv4.c) tcp的connect实际处理函数
+									
 							|-->sock->state = SS_CONNECTING //(af_inet.c)
 							|-->sock_sndtimeo //()
-							|-->
+							
+|-->tcp_v4_connect //(tcp_ipv4.c) tcp的connect处理函数
+	|-->ip_route_connect //()
+	|-->sk_rcv_saddr_set //()
+	|-->sk_daddr_set //()
+	|-->tcp_set_state(sk, TCP_SYN_SENT) //(net/ipv4/tcp.c) 设置sk的状态为TCP_SYN_SENT
+	|-->inet_hash_connect //(inet_hashtables.c)
+		|-->__inet_check_established //(inet_hashtables.c)
+			|-->twsk_unique //(timewait_sock.h)
+				|-->if (sk->sk_prot->twsk_prot->twsk_unique != NULL)
+					|-->sk->sk_prot->twsk_prot->twsk_unique //(timewait_sock.h) 调用的实际函数为tcp_twsk_unique
+						|-->tcp_twsk_unique //(tcp_ipv4.c)
+							|-->init_net.ipv4.sysctl_tcp_tw_reuse //(/proc/sys/net/ipv4/tcp_tw_reuse) 如果该变量开启后会将time_wait重用, 该值只使用于client端
+
+	|-->sk_set_txhash //()
+	|-->ip_route_newports //()
+	|-->tp->write_seq = secure_tcp_seq(inet->inet_saddr,
+										inet->inet_daddr,
+										inet->inet_sport,
+										usin->sin_port) //(tcp_ipv4.c) 计算seq的初始化值,根据源端口，目的端口，源ip地址，目的ip地址进行的hash算法
+	|-->net_secret_init //()
+	|-->hash = siphash_3u32((__force u32)saddr, (__force u32)daddr,
+		(__force u32)sport << 16 | (__force u32)dport, &net_secret) //(secure_seq.c) 将源端口左移16到高位，目的端口为低16位
+		
+	|-->seq_scale(hash) //(secure_seq.c)
+		|-->return seq + (ktime_get_real_ns() >> 6) //(secure_seq.c) 是一个计时器，这个计时器每隔4毫秒加1, 加上之前hash的结果值等于seq的初始化值
+
+	|-->tp->tsoffset = secure_tcp_ts_off(sock_net(sk),
+										inet->inet_saddr,
+										inet->inet_daddr) //(tcp_ipv4.c)
+
+	|-->tcp_connect //tcp的connect数据处理函数，包含SYN的发送和超时处理
+			
+|-->tcp_connect //(tcp_output.c) Build a SYN and send it off 
+	|-->tcp_connect_init //(tcp_output.c)
+	|-->tcp_init_nondata_skb(buff, tp->write_seq++, TCPHDR_SYN) //(tcp_output.c) 设置tcp_flags为SYN，为传输构造函数做准备
+	|-->tcp_mstamp_refresh //()													
+	|-->tp->retrans_stamp = tcp_time_stamp(tp) //								
+	|-->tcp_connect_queue_skb //(tcp_output.c)																											
+	|-->tcp_ecn_send_syn //(tcp_output.c)																											
+																				
+	|-->tp->fastopen_req ? tcp_send_syn_data(sk, buff) :						
+			tcp_transmit_skb(sk, buff, 1, sk->sk_allocation)//(tcp_output.c)	
+			
+		|-->case tcp_send_syn_data //(tcp_output.c)								
+			|-->TCP_SKB_CB(syn_data)->tcp_flags = TCPHDR_ACK | TCPHDR_PSH // (tcp_output.c) (设置flags)
+			|-->tcp_transmit_skb //(tcp_output.c)								
+				|-->if (unlikely(tcb->tcp_flags & TCPHDR_SYN)) //(tcp_output.c)
+					|-->tcp_syn_options //(tcp_output.c)
+						|-->
+				
+				|-->else
+					|-->tcp_established_options //
+				
+		|-->case tcp_transmit_skb //(tcp_output.c)
+			|-->*(((__be16 *)th) + 6) = htons(((tcp_header_size >> 2) << 12) | tcb->tcp_flags) //(tcp_output.c) 为tcp头赋值，并使用tcp_flags表示flag，如果为connect，则该值为TCPHDR_SYN(0x02) 即数据包中包含SYN
+			|-->icsk->icsk_af_ops->queue_xmit //(tcp_output.c)
+				|-->ip_queue_xmit //()
+
+	|-->inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, inet_csk(sk)->icsk_rto, TCP_RTO_MAX)//(inet_connection_sock.h)设置timer，用于接收server的ACK_SYN返回值
+		|-->sk_reset_timer(sk, &icsk->icsk_retransmit_timer, icsk->icsk_timeout) //设置定时器，用于重传SYN数据包
 		
 |-->socket //应用层
 	|-->SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol) //(net/socket.c) kernel层
@@ -654,8 +698,17 @@ i	|-->struct proto tcp_prot = {
 					|-->rcu_assign_pointer(fdt->fd[fd], file) //(rcupdate.h) 将fd与文件关联起来, 该函数与下面的fdget对应起来
 			
 			|-->return fd //()
-			
 
+|-->sk->sk_state_change //状态变化处理函数		
+	|-->sock_def_wakeup //(sock.c) 实际回调处理函数
+		|-->wq = rcu_dereference(sk->sk_wq) //这里开始联系上epoll的系统调用，具体参见epoll的原理
+		|-->wake_up_interruptible_all(&wq->wait) //(wait.h)
+			|-->__wake_up //(wait.c)
+				|-->__wake_up_common_lock //(wait.c)
+					|-->__wake_up_common //(wait.c)
+						|-->curr->func //(wait.c)
+							|-->ep_poll_callback //(eventpoll.c) 
+			
 |-->listen //应用层
 	|-->SYSCALL_DEFINE2(listen, int, fd, int, backlog) //(net/socket.c) kernel层
 		|-->sock = sockfd_lookup_light //(socket.c)
@@ -721,58 +774,61 @@ i	|-->struct proto tcp_prot = {
 									|-->sock->ops->release(sock) //(sock.c)
 										|-->inet_release //(net/ipv4/af_inet.c)
 											|-->sk->sk_prot->close //(af_inet.c)
-												|-->tcp_close //(net/ipv4/tcp.c)
-													|-->if (sk->sk_state == TCP_LISTEN)
-															|-->tcp_set_state(sk, TCP_CLOSE)//
-															|-->inet_csk_listen_stop //()
-															|-->goto adjudge_to_death:
+												|-->tcp_close //tcp close处理函数
+														
+|-->tcp_close //(net/ipv4/tcp.c)
+	|-->if (sk->sk_state == TCP_LISTEN)
+			|-->tcp_set_state(sk, TCP_CLOSE)//
+			|-->inet_csk_listen_stop //()
+			|-->goto adjudge_to_death:
 
-														|-->sk_mem_reclaim //()
-														|-->tcp_close_state //(tcp.c)根据new_state中的枚举进行状态迁移
-															|-->next = (int)new_state[sk->sk_state]
-															|-->ns = next & TCP_STATE_MASK
-															|-->tcp_set_state(sk, ns)//设置状态
-																|-->switch(oldstate)
-																	|-->case TCP_ESTABLISHED:
-																		|-->TCP_FIN_WAIT1 //
+		|-->sk_mem_reclaim //()
+		|-->tcp_close_state //(tcp.c)根据new_state中的枚举进行状态迁移
+			|-->next = (int)new_state[sk->sk_state]
+			|-->ns = next & TCP_STATE_MASK
+			|-->tcp_set_state(sk, ns)//设置状态
+				|-->switch(oldstate)
+					|-->case TCP_ESTABLISHED:
+						|-->TCP_FIN_WAIT1 //
 
-																	|-->case TCP_CLOSE_WAIT:
-																		|-->case TCP_LAST_ACK //
+					|-->case TCP_CLOSE_WAIT:
+						|-->case TCP_LAST_ACK //
 
-														|-->tcp_send_fin //(tcp_output.c)
-															|-->tcp_init_nondata_skb(skb, tp->write_seq, TCPHDR_ACK | TCPHDR_FIN)
-															|-->tcp_queue_skb //()
+		|-->tcp_send_fin //(tcp_output.c)
+			|-->tcp_init_nondata_skb(skb, tp->write_seq, TCPHDR_ACK | TCPHDR_FIN)
+			|-->tcp_queue_skb //()
 
-														|-->sk_stream_wait_close //(stream.c)
-															|-->DEFINE_WAIT_FUNC(wait, woken_wake_function) //(wait.h)
-																|-->.func       = function //(wait.h)
+		|-->sk_stream_wait_close //(stream.c)
+			|-->DEFINE_WAIT_FUNC(wait, woken_wake_function) //(wait.h)
+				|-->.func       = function //(wait.h)
 
-															|-->add_wait_queue //(wait.c)
-																|-->__add_wait_queue //(wait.h)
+			|-->add_wait_queue //(wait.c)
+				|-->__add_wait_queue //(wait.h)
 
-															|-->sk_wait_event(sk, &timeout, !sk_stream_closing(sk), &wait)//(sock.h)
-																|-->release_sock //(sock.c)
-																	|-->sk->sk_prot->release_cb //(sock.c)
-																		|-->tcp_release_cb //(tcp_output.c)
-																			|-->sock_release_ownership //()
-																			|-->__sock_put //(sock.h)
+			|-->sk_wait_event(sk, &timeout, !sk_stream_closing(sk), &wait)//(sock.h)
+				|-->release_sock //(sock.c)
+					|-->sk->sk_prot->release_cb //(sock.c)
+						|-->tcp_release_cb //(tcp_output.c)
+							|-->sock_release_ownership //()
+							|-->__sock_put //(sock.h)
 
-																|-->wait_woken //()
-																|-->sched_annotate_sleep //(kernel.h)
-																	|-->current->task_state_change = 0 //(kernel.h)
+				|-->wait_woken //()
+				|-->sched_annotate_sleep //(kernel.h)
+					|-->current->task_state_change = 0 //(kernel.h)
 
-															|-->remove_wait_queue //(wait.c)
-																|-->__remove_wait_queue //(wait.h)
+			|-->remove_wait_queue //(wait.c)
+				|-->__remove_wait_queue //(wait.h)
+				
 adjudge_to_death:
-														|-->sock_hold //()
-														|-->sock_orphan //()
-														|-->release_sock //()
+		|-->sock_hold //()
+		|-->sock_orphan //()
+		|-->release_sock //()
 
 |-->tcp_rcv_synsent_state_process //(tcp_input.c)
 	|-->if (th->syn)
 		|-->tcp_set_state(sk, TCP_SYN_RECV) //(tcp_input.c)
 
-
+		
 |-->tcp_check_req //(tcp_minisocks.c)
 	|-->tcp_v4_syn_recv_sock //(tcp_ipv4.c)
 		|-->tcp_create_openreq_child //(net/ipv4/tcp_minisocks.c)
@@ -787,3 +843,9 @@ adjudge_to_death:
 |-->inet_hash //(inet_hashtables.c)
 	|-->__inet_hash //(inet_hashtables.c)
 		|-->inet_reuseport_add_sock //(inet_hashtables.c)
+		
+
+|-->tcp_data_snd_check //(tcp_input.c)	
+	|-->tcp_check_space //(tcp_input.c)	
+		|-->tcp_new_space //(tcp_input.c)
+			|--> sk->sk_write_space(sk) //(tcp_input.c)

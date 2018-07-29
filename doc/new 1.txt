@@ -1,0 +1,93 @@
+|-->pm_wanc_handle_add_of_app //(wanc_pmapi.c)
+	|-->zxicDbAddView //
+	|-->zxicDbSetView //
+	
+|-->pm_wanc_handle_del_of_app //(wanc_pmapi.c)
+	|-->zxicDbQryView //搜索数据库
+	|-->for(index=0; index<tList.dwCount; index++)
+		|-->zxicDbGetView //
+		|-->if(ZXICGET_BOOL(tSERVLIST.tIsDel) == TRUE)
+			|-->continue
+			
+		|-->if(ZXICGET_ENUM(tSERVLIST.tApplication) == AppType)
+			|-->if((bRebootFlag ==1)&& (AppType == APP_TR069))
+				|--> ZXICSET_BOOL(tSERVLIST.tIsDel, TRUE)
+				|-->zxicDbSetView //
+				
+			|-->zxicDbDelView
+			
+			
+|-->pm_wanc_list_wanc_on_apptype //(wanc_pmapi.c)
+	|-->if(AppType == APP_ROUTE)
+	
+	|-->else
+		|-->zxicDbLstView
+		|-->for(index=0; index<tList.dwCount; index++)
+			|-->zxicDbGetView
+			|-->if(ZXICGET_ENUM(tSERVLIST.tApplication)!= AppType)
+				|-->continue
+				
+			|-->
+			
+			
+|-->pm_wanc_tr069_handle_del_of_app //(wanc_pmapi.c)
+	|-->zxicDbQryView
+	|-->for(index=0; index<tList.dwCount; index++)
+		|-->zxicDbGetView
+		|-->if(ZXICGET_BOOL(tSERVLIST.tIsDel) == TRUE)
+			|-->continue
+			
+		|-->if(ZXICGET_ENUM(tSERVLIST.tApplication) == AppType)
+			|-->if(AppType == APP_TR069)
+				|-->ZXICSET_BOOL(tSERVLIST.tIsDel, TRUE)
+				|-->zxicDbSetView
+				|-->break
+				
+			|-->zxicDbDelView
+			
+			
+|-->pm_wanc_set_servlist_app //(wanc_pmapi.c)		
+	|-->pm_wanc_handle_app_on_routed //(wanc_pmapi.c)
+		|-->pm_wanc_handle_add_of_app //(wanc_pmapi.c)
+		
+		
+		
+1、cucc kmodule mtk7603e
+2、cspd wlan_config.c
+3、cucc kmodule 
+4、cucc kmodule mtk7603e
+
+"【zte】【安徽移动】修改使能IGMP SNOOPING默认让其开启，否则无法使用组播拉流
+1. [zte][cmcc][patch]中兴微patch，修复bug：nand 读一页数据，随机出现16字节错误。
+解决方案：用于dma读写的buffer起始地址和cache line对齐，在dma操作完成之后再invalid L1/L2 cache. 
+影响分析：该问题导致进程启动失败（如phoneapp），flash分区文件读写随机出错. 
+测试建议：长时间flash全片擦除拷机测试，确保进程正常启动，文件读写正常.
+2. cm-osgi：中兴微patch20180529：
+r30697: Separate spifc data and spare cache area"
+
+sidbg 74 osgid install name=com.chinamobile.smartgateway.apitest url=http://hsop.komect.com:10085/group1/M00/00/00/rBkeOVpvwxmAEJCjABy8i-OltpM508.jar fsize=1883275
+sidbg 74 osgid install name=com.chinamobile.smartgateway.apitest url=http://hsop.komect.com/group1/M00/00/00/rBkeOVpvwxmAEJCjABy8i-OltpM508.jar fsize=1883275
+
+sidbg 74 osgid install name=com.chinamobile.smartgateway.andlink url=http://192.168.1.101/com.chinamobile.smartgateway.andlink.jar fsize=813218
+
+00:03:19 [U_fw_flashing][Error] [fw_flashing.c(1092)SetVersionUpgra] get TAG_ID_FK_UPGRADE from flash failed!
+
+
+
+【zte】【终端公司】修改版本号
+
+TR069_CORE_PID　PM_OBJ_TR069_START
+pm_send_msg_2mm(TR069_CORE_PID, EV_PM_SET, PM_OBJ_TR069_START, szInstIdentity,
+                        (LPVOID)&tNewViewConfig, sizeof(T_VIEW_MGT_SERVER), ackData, &ackLen);
+						
+|-->si_tr069_proc_pmapi_set_msg //(tr069_main.c)
+	|-->
+	
+	
+b68fdfa4
+b6887000
+76FA4
+
+00008000
+00035d80
+2DD80
