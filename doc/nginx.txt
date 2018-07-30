@@ -907,7 +907,7 @@ ngx_module_t  ngx_http_upstream_module = {
 
 	|-->delta = ngx_current_msec - delta
 			
-	|-->ngx_event_process_posted(cycle, &ngx_posted_accept_events)//处理在process_events中插入的数据,其处理流程见下面的分析
+	|-->ngx_event_process_posted(cycle, &ngx_posted_accept_events)//其处理流程见下面的分析
 	
 	|-->if (ngx_accept_mutex_held)
 		|-->ngx_shmtx_unlock(&ngx_accept_mutex)
@@ -917,7 +917,29 @@ ngx_module_t  ngx_http_upstream_module = {
 		
 	|-->ngx_event_process_posted(cycle, &ngx_posted_events) //处理插入链表中的数据	
 
-	
+|-->ngx_trylock_accept_mutex //(ngx_event_accept.c) 获取accept_mutex锁
+	|-->if (ngx_shmtx_trylock(&ngx_accept_mutex)) //尝试获取accept锁,如果获取到进入该分支
+		|-->if (ngx_accept_mutex_held && ngx_accept_events == 0)
+			|-->return OK
+
+		|-->ngx_enable_accept_events //(ngx_event_accept.c)
+			|-->for (i = 0; i < cycle->listening.nelts; i++)
+				|-->c = ls[i].connection
+				|-->if (c == NULL || c->read->active)
+					continue
+					
+				|-->ngx_add_event(c->read, NGX_READ_EVENT, 0) //函数的实现参见函数分析说明
+		
+		|-->ngx_accept_events = 0
+		|-->ngx_accept_mutex_held = 1
+		|-->return NGX_OK
+
+	|-->if (ngx_accept_mutex_held)
+		|-->ngx_disable_accept_events
+		|-->ngx_accept_mutex_held = 0
+
+	|-->return NGX_OK
+
 |-->ngx_epoll_process_events //(ngx_epoll_module.c) 具体的事件处理, 其内部处理流程常见下面的函数梳理
 	|-->events = epoll_wait(ep, event_list, (int) nevents, timer) //等待数据的到来
 	|-->for (i = 0; i < events; i++)
@@ -931,6 +953,8 @@ ngx_module_t  ngx_http_upstream_module = {
 			|-->else
 				|-->rev->handler //(ngx_epoll_module.c)该回调函数在不同阶段被赋予不同的处理函数
 					|-->case ngx_event_accept //(ngx_event_accept.c)从listen状态接收到的新连接socket，准备accept
+
+					|-->case ngx_stream_init_connection //(ngx_stream_handler.c) tcp/udp负载均衡
 															
 					|-->case ngx_http_wait_request_handler //(ngx_http_request.c) accept后的socket数据处理
 							
@@ -962,29 +986,6 @@ ngx_module_t  ngx_http_upstream_module = {
 				|-->case "ngx_posted_events": //处理可写事件
 
 
-|-->ngx_trylock_accept_mutex //(ngx_event_accept.c) 获取accept_mutex锁
-	|-->if (ngx_shmtx_trylock(&ngx_accept_mutex)) //尝试获取accept锁,如果获取到进入该分支
-		|-->if (ngx_accept_mutex_held && ngx_accept_events == 0)
-			|-->return OK
-
-		|-->ngx_enable_accept_events //(ngx_event_accept.c)
-			|-->for (i = 0; i < cycle->listening.nelts; i++)
-				|-->c = ls[i].connection
-				|-->if (c == NULL || c->read->active)
-					continue
-					
-				|-->ngx_add_event(c->read, NGX_READ_EVENT, 0) //函数的实现参见函数分析说明
-		
-		|-->ngx_accept_events = 0
-		|-->ngx_accept_mutex_held = 1
-		|-->return NGX_OK
-
-	|-->if (ngx_accept_mutex_held)
-		|-->ngx_disable_accept_events
-		|-->ngx_accept_mutex_held = 0
-
-	|-->return NGX_OK
-
 |-->ngx_event_expire_timers //(ngx_event_timer.c) 时间处理函数
 	|-->sentinel = ngx_event_timer_rbtree.sentinel
 	|-->for ( ;; )
@@ -1000,7 +1001,7 @@ ngx_module_t  ngx_http_upstream_module = {
 		|-->ngx_rbtree_delete(&ngx_event_timer_rbtree, &ev->timer)
 		|-->ev->timer_set = 0
 		|-->ev->timedout = 1
-		|-->ev->handler(ev) //回调函数
+		|-->ev->handler(ev) //定时器列表的回调函数, 处理通过ngx_add_timer添加的队列
 			|-->ngx_stream_proxy_downstream_handler //(ngx_stream_proxy_module.c) 参见上面的流程
 
 |-->ngx_stream_proxy_downstream_handler //(ngx_stream_proxy_module.c)
@@ -1660,7 +1661,7 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 			|-->ngx_stream_add_addrs //
 			|-->ngx_clone_listening //
 
-|-->ngx_stream_init_connection //(ngx_stream_handler.c) stream的处理函数
+|-->ngx_stream_init_connection //(ngx_stream_handler.c) tcp/udp负载均衡处理函数,如果定义了该函数这在accept后调用该函数
 	|-->rev->handler = ngx_stream_session_handler
 	|-->if (addr_conf->proxy_protocol)
 		|-->rev->handler = ngx_stream_proxy_protocol_handler
@@ -1674,11 +1675,14 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 		|-->case ngx_stream_session_handler //(ngx_stream_handler.c)
 			|-->ngx_stream_core_run_phases //(ngx_stream_core_module.c)
 				|-->ph = cmcf->phase_engine.handlers
-				|-->while (ph[s->phase_handler].checker)
-					|-->rc = ph[s->phase_handler].checker(s, &ph[s->phase_handler]) //
+				|-->while (ph[s->phase_handler].checker) //checker回调函数,其定义在ngx_stream_init_phase_handlers
+					|-->rc = ph[s->phase_handler].checker(s, &ph[s->phase_handler]) //checker回调处理函数
+						|-->case ngx_stream_core_preread_phase //
+						|-->case ngx_stream_core_content_phase //主要处理函数
+						|-->case ngx_stream_core_generic_phase //
 
-|-->ngx_stream_proxy_pass //(ngx_stream_proxy_module.c)
-	|-->cscf->handler = ngx_stream_proxy_handler
+|-->ngx_stream_proxy_pass //(ngx_stream_proxy_module.c) stream模块定义处理函数
+	|-->cscf->handler = ngx_stream_proxy_handler //将在后面的context中进行处理调用
 	|-->ngx_stream_compile_complex_value //
 	|-->ngx_stream_upstream_add //
 
@@ -1715,20 +1719,15 @@ found:
 
 	|-->ngx_stream_proxy_connect //连接后端服务器
 
-|-->ngx_stream_proxy_connect //(ngx_stream_proxy_module.c)
+|-->ngx_stream_proxy_connect //(ngx_stream_proxy_module.c) 负载均衡选择连接后端服务器
 	|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器 
 	|-->pc->read->handler = ngx_stream_proxy_connect_handler
 	|-->pc->write->handler = ngx_stream_proxy_connect_handler
-	|-->ngx_add_timer(pc->write, pscf->connect_timeout)
-		|-->ngx_event_add_timer //(ngx_event.h)
-			|-->ngx_rbtree_insert(&ngx_event_timer_rbtree, &ev->timer)//(ngx_rbtree.c)
-				|-->tree->insert(*root, node, sentinel)
-				|-->ngx_rbt_black //(ngx_rbtree.h)
-					|-->((node)->color = 0)
+	|-->ngx_add_timer(pc->write, pscf->connect_timeout) //添加到超时处理队列中,最终会在ngx_event_expire_timers中被处理
 					
 |-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器
 	|-->rc = pc->get(pc, pc->data) //回调函数
-		|-->ngx_stream_upstream_get_round_robin_peer //()
+		|-->ngx_stream_upstream_get_round_robin_peer //对后端服务器进行选择,进行负载均衡处理
 			|-->ngx_stream_upstream_get_round_robin_peer //获取对端的连接信息
 				
 		|-->ngx_socket //创建socket
@@ -1744,8 +1743,33 @@ found:
 		|-->ngx_add_conn //添加到可读事件中
 			|-->ngx_event_actions.add_conn //添加到epoll监听中
 			
-		|-->connect //连接对端
+		|-->connect //连接对端,由于是非阻塞所以第一次连接可能会失败
 
+|-->ngx_add_timer(pc->write, pscf->connect_timeout) //添加到超时处理队列中
+	|-->ngx_event_add_timer //(ngx_event.h)
+		|-->ngx_rbtree_insert(&ngx_event_timer_rbtree, &ev->timer)//(ngx_rbtree.c)
+			|-->tree->insert(*root, node, sentinel)
+			|-->ngx_rbt_black //(ngx_rbtree.h)
+				|-->((node)->color = 0)
+
+|-->ngx_stream_proxy_connect_handler //(ngx_stream_proxy_module.c)
+	|-->if (ev->timedout) //如果超时
+		|-->ngx_stream_proxy_next_upstream //
+		|-->return
+
+	|-->ngx_del_timer(c->write) //从定时器队列中删除
+	|-->ngx_stream_proxy_test_connect //
+	|-->ngx_stream_proxy_init_upstream //
+
+|-->ngx_stream_proxy_test_connect //()
+
+|-->ngx_stream_proxy_init_upstream //(ngx_stream_proxy_module.c)
+	|-->ngx_tcp_nodelay //
+	|-->ngx_connection_local_sockaddr //
+	|-->pc->read->handler = ngx_stream_proxy_upstream_handler //
+	|-->pc->write->handler = ngx_stream_proxy_upstream_handler //
+	|-->ngx_stream_proxy_process //
+					
 |-->ngx_event_timer_init //(ngx_event_timer.c)
 	|-->ngx_rbtree_init(&ngx_event_timer_rbtree, &ngx_event_timer_sentinel,
                     ngx_rbtree_insert_timer_value)
