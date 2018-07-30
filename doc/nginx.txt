@@ -1660,7 +1660,7 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 			|-->ngx_stream_add_addrs //
 			|-->ngx_clone_listening //
 
-|-->ngx_stream_init_connection //(ngx_stream_handler.c)
+|-->ngx_stream_init_connection //(ngx_stream_handler.c) stream的处理函数
 	|-->rev->handler = ngx_stream_session_handler
 	|-->if (addr_conf->proxy_protocol)
 		|-->rev->handler = ngx_stream_proxy_protocol_handler
@@ -1713,10 +1713,10 @@ found:
 			|-->s->upstream->peer.notify = ngx_stream_upstream_notify_round_robin_peer
 			|-->s->upstream->peer.tries = ngx_stream_upstream_tries(rrp->peers)
 
-	|-->ngx_stream_proxy_connect //
+	|-->ngx_stream_proxy_connect //连接后端服务器
 
 |-->ngx_stream_proxy_connect //(ngx_stream_proxy_module.c)
-	|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器
+	|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器 
 	|-->pc->read->handler = ngx_stream_proxy_connect_handler
 	|-->pc->write->handler = ngx_stream_proxy_connect_handler
 	|-->ngx_add_timer(pc->write, pscf->connect_timeout)
@@ -1725,6 +1725,26 @@ found:
 				|-->tree->insert(*root, node, sentinel)
 				|-->ngx_rbt_black //(ngx_rbtree.h)
 					|-->((node)->color = 0)
+					
+|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器
+	|-->rc = pc->get(pc, pc->data) //回调函数
+		|-->ngx_stream_upstream_get_round_robin_peer //()
+			|-->ngx_stream_upstream_get_round_robin_peer //获取对端的连接信息
+				
+		|-->ngx_socket //创建socket
+		|-->ngx_get_connection //
+		|-->ngx_nonblocking //设置为非阻塞
+		
+		|-->if (type == SOCK_STREAM)
+			|-->c->recv = ngx_recv
+			|-->c->send = ngx_send
+			|-->c->recv_chain = ngx_recv_chain
+			|-->c->send_chain = ngx_send_chain
+			
+		|-->ngx_add_conn //添加到可读事件中
+			|-->ngx_event_actions.add_conn //添加到epoll监听中
+			
+		|-->connect //连接对端
 
 |-->ngx_event_timer_init //(ngx_event_timer.c)
 	|-->ngx_rbtree_init(&ngx_event_timer_rbtree, &ngx_event_timer_sentinel,
@@ -1771,4 +1791,7 @@ found:
 
 	|-->ngx_stream_finalize_session //()
 
-|-->ngx_stream_core_generic_phase //()
+|-->ngx_stream_core_generic_phase //(ngx_stream_core_module.c)
+	
+|-->ngx_stream_upstream_update_random //(ngx_stream_upstream_random_module.c)	
+	|-->ngx_alloc //(ngx_alloc.c) 内存分配
