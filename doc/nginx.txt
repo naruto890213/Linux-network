@@ -1724,6 +1724,8 @@ found:
 	|-->pc->read->handler = ngx_stream_proxy_upstream_handler //
 	|-->pc->write->handler = ngx_stream_proxy_upstream_handler //
 	|-->ngx_stream_proxy_process //proxy处理函数
+
+|-->ngx_stream_proxy_upstream_handler //()
 	
 |-->ngx_stream_proxy_process //(ngx_stream_proxy_module.c)
 	|-->if (from_upstream) //来自负载均衡
@@ -1823,3 +1825,20 @@ found:
 			|-->return
 
 		|-->ngx_stream_proxy_process //(ngx_stream_proxy_module.c)
+
+|-->ngx_stream_proxy_finalize //(ngx_stream_proxy_module.c)
+	|-->if (u->peer.free && u->peer.sockaddr) //如果定义了free函数且存在地址则释放其内存
+		|-->u->peer.free() //调用free回调函数
+			|-->ngx_stream_upstream_free_round_robin_peer //() 实际的处理函数
+		
+		|-->u->peer.sockaddr = NULL
+
+	|-->if(pc)
+		|-->ngx_close_connection(pc) //close 相应的socket数据
+		|-->u->peer.connection = NULL
+
+	|-->ngx_stream_finalize_session //session最终销毁处理函数
+	
+|-->ngx_stream_finalize_session //(ngx_stream_handler.c)
+	|-->ngx_stream_log_session //
+	|-->ngx_stream_close_connection //
