@@ -1002,51 +1002,6 @@ ngx_module_t  ngx_http_upstream_module = {
 		|-->ev->timer_set = 0
 		|-->ev->timedout = 1
 		|-->ev->handler(ev) //定时器列表的回调函数, 处理通过ngx_add_timer添加的队列
-			|-->ngx_stream_proxy_downstream_handler //(ngx_stream_proxy_module.c) 参见上面的流程
-
-|-->ngx_stream_proxy_downstream_handler //(ngx_stream_proxy_module.c)
-	|-->ngx_stream_proxy_process_connection //(ngx_stream_proxy_module.c)
-		|-->if (c->close)
-			|-->ngx_stream_proxy_finalize(s, NGX_STREAM_OK)
-			|-->return
-
-		|-->ngx_stream_proxy_process //(ngx_stream_proxy_module.c)
-
-|-->ngx_stream_proxy_process //(ngx_stream_proxy_module.c)
-	|-->if (from_upstream) //来自负载均衡
-		|-->recv_action = "proxying and reading from upstream"
-		|-->send_action = "proxying and sending to client"
-
-	|-->else //from_upstream为空的情况
-		|-->recv_action = "proxying and reading from client"
-		|-->send_action = "proxying and sending to upstream"
-
-	|-->for ( ;; )
-		|-->if (do_write && dst)
-			|-->if (*out || *busy || dst->buffered)
-				|-->c->log->action = send_action
-				|-->ngx_stream_top_filter(s, *out, from_upstream)//发往对端
-				|-->ngx_chain_update_chains //
-
-		|-->if (size && src->read->ready && !src->read->delayed
-            && !src->read->error) //有可读事件
-			|-->c->log->action = recv_action
-			|-->src->recv(src, b->last, size)
-
-|-->ngx_stream_top_filter //(ngx_stream_write_filter_module.c)
-	|-->ngx_stream_write_filter //(ngx_stream_write_filter_module.c)
-		|-->c->send_chain(c, *out, 0) //调用回调函数
-			|-->ngx_send_chain //(ngx_event.h)
-				|-->ngx_io.send_chain //(ngx_event.h)
-					|-->ngx_writev_chain //(ngx_posix_init.c)
-			
-|-->ngx_writev_chain //(ngx_posix_init.c)
-	|-->for ( ;; )
-		|-->ngx_output_chain_to_iovec //
-		|-->ngx_writev(c, &vec) //(ngx_writev_chain.c)
-			|-->writev(c->fd, vec->iovs, vec->count) // 写入数据
-
-		|-->ngx_chain_update_sent //
 
 |-->ngx_epoll_eventfd_handler //(ngx_epoll_module.c)
 	|-->epoll_ctl
@@ -1752,14 +1707,14 @@ found:
 			|-->ngx_rbt_black //(ngx_rbtree.h)
 				|-->((node)->color = 0)
 
-|-->ngx_stream_proxy_connect_handler //(ngx_stream_proxy_module.c)
+|-->ngx_stream_proxy_connect_handler //(ngx_stream_proxy_module.c) connect的定时处理函数
 	|-->if (ev->timedout) //如果超时
 		|-->ngx_stream_proxy_next_upstream //
 		|-->return
 
 	|-->ngx_del_timer(c->write) //从定时器队列中删除
 	|-->ngx_stream_proxy_test_connect //
-	|-->ngx_stream_proxy_init_upstream //
+	|-->ngx_stream_proxy_init_upstream // proxy负载均衡初始化
 
 |-->ngx_stream_proxy_test_connect //()
 
@@ -1768,7 +1723,48 @@ found:
 	|-->ngx_connection_local_sockaddr //
 	|-->pc->read->handler = ngx_stream_proxy_upstream_handler //
 	|-->pc->write->handler = ngx_stream_proxy_upstream_handler //
-	|-->ngx_stream_proxy_process //
+	|-->ngx_stream_proxy_process //proxy处理函数
+	
+|-->ngx_stream_proxy_process //(ngx_stream_proxy_module.c)
+	|-->if (from_upstream) //来自负载均衡
+		|-->recv_action = "proxying and reading from upstream"
+		|-->send_action = "proxying and sending to client"
+
+	|-->else //发往对端的数据(负载均衡)
+		|-->recv_action = "proxying and reading from client"
+		|-->send_action = "proxying and sending to upstream"
+
+	|-->for ( ;; )
+		|-->if (do_write && dst)
+			|-->if (*out || *busy || dst->buffered)
+				|-->c->log->action = send_action
+				|-->ngx_stream_top_filter(s, *out, from_upstream)//发往对端
+				|-->ngx_chain_update_chains //
+
+		|-->if (size && src->read->ready && !src->read->delayed
+            && !src->read->error) //有可读事件
+			|-->c->log->action = recv_action
+			|-->src->recv(src, b->last, size)
+			
+	|-->ngx_handle_read_event(src->read, flags) //将server的fd添加到epoll的监听队列中
+	|-->if (dst)
+		|-->ngx_add_timer(c->write, pscf->timeout) //添加到定时器队列中
+
+|-->ngx_stream_top_filter //(ngx_stream_write_filter_module.c)
+	|-->ngx_stream_write_filter //(ngx_stream_write_filter_module.c)
+		|-->c->send_chain(c, *out, 0) //调用回调函数
+			|-->ngx_send_chain //(ngx_event.h)
+				|-->ngx_io.send_chain //(ngx_event.h)
+					|-->ngx_writev_chain //(ngx_posix_init.c)
+			
+|-->ngx_writev_chain //(ngx_posix_init.c)
+	|-->for ( ;; )
+		|-->ngx_output_chain_to_iovec //
+		|-->ngx_writev(c, &vec) //(ngx_writev_chain.c)
+			|-->writev(c->fd, vec->iovs, vec->count) // 写入数据
+
+		|-->ngx_chain_update_sent //
+
 					
 |-->ngx_event_timer_init //(ngx_event_timer.c)
 	|-->ngx_rbtree_init(&ngx_event_timer_rbtree, &ngx_event_timer_sentinel,
@@ -1819,3 +1815,11 @@ found:
 	
 |-->ngx_stream_upstream_update_random //(ngx_stream_upstream_random_module.c)	
 	|-->ngx_alloc //(ngx_alloc.c) 内存分配
+
+|-->ngx_stream_proxy_downstream_handler //(ngx_stream_proxy_module.c)
+	|-->ngx_stream_proxy_process_connection //(ngx_stream_proxy_module.c)
+		|-->if (c->close)
+			|-->ngx_stream_proxy_finalize(s, NGX_STREAM_OK)
+			|-->return
+
+		|-->ngx_stream_proxy_process //(ngx_stream_proxy_module.c)
