@@ -1049,7 +1049,6 @@ accept状态:
 				|-->if (m->init_conf)
 					|-->m->init_conf //(ngx_event.c)
 		
-
 |-->ngx_event_process_init //(ngx_event.c) event模块的初始化函数,根据不同的分类进行子模块的初始化工作和一些绑定关系的设置
 	|-->if(ccf->master && ccf->worker_processes > 1 && ecf->accept_mutex) //ecf->accept_mutex默认为0不会进入该分支
 		|-->ngx_use_accept_mutex = 1
@@ -1127,15 +1126,6 @@ accept状态:
 	|-->c = ngx_cycle->free_connections //从free_connections链表获取
 	|-->if (c == NULL) //如果free_connections链表为空
 		|-->ngx_drain_connections //(ngx_connection.c)
-			|-->for (i = 0; i < n; i++)
-				|-->if (ngx_queue_empty(&cycle->reusable_connections_queue))
-					|-->break;
-
-				|-->q = ngx_queue_last(&cycle->reusable_connections_queue)
-				|-->c = ngx_queue_data(q, ngx_connection_t, queue) //获取节点
-				|-->c->close = 1
-				|-->c->read->handler(c->read)
-
 		|-->c = ngx_cycle->free_connections //再次进行赋值
 
 	|-->if (c == NULL) //再次进行判断,如果依然为空则返回null
@@ -1158,6 +1148,16 @@ accept状态:
 	|-->return c //返回一个connections指针
 
 
+|-->ngx_drain_connections //(ngx_connection.c)
+	|-->for (i = 0; i < n; i++)
+		|-->if (ngx_queue_empty(&cycle->reusable_connections_queue))
+			|-->break;
+
+		|-->q = ngx_queue_last(&cycle->reusable_connections_queue)
+		|-->c = ngx_queue_data(q, ngx_connection_t, queue) //获取节点
+		|-->c->close = 1
+		|-->c->read->handler(c->read)
+
 |-->ngx_event_accept //(ngx_event_accept.c)处理accept事件,并设置下一阶段的handler处理函数
 	|-->c->recv = ngx_recv //设置回调函数绑定
 	|-->c->send = ngx_send //设置回调函数绑定
@@ -1166,23 +1166,24 @@ accept状态:
 		|-->c = ngx_get_connection(s, ev->log) //获取空闲的connection节点
 		|-->ls->handler //(ngx_event_accept.c)
 			|-->ngx_http_init_connection //(ngx_http_request.c)
-				|-->rev->handler = ngx_http_wait_request_handler // 设置可读回调函数	
-				|-->c->write->handler = ngx_http_empty_handler // 设置可写的回调函数
-				|-->if (rev->ready) //可读
-					|-->rev->handler //(ngx_event_accept.c) 执行回调函数 
-						|-->ngx_http_wait_request_handler //如果上面有可读事件则调用该函数
-
-					|-->return //退出函数
-
-				|-->ngx_add_timer(rev, c->listening->post_accept_timeout) //
-				|-->ngx_reusable_connection(c, 1) //将c插入到reuse链表中,达到重复利用
-				|-->ngx_handle_read_event(rev, 0) //(ngx_event.c) 添加到可读事件中
-					|-->if (ngx_event_flags & NGX_USE_CLEAR_EVENT) //epoll会进入到该分支,在epoll_init你们进行设置
-						|-->if (!rev->active && !rev->ready)
-							|-->ngx_add_event(rev, NGX_READ_EVENT, NGX_CLEAR_EVENT) //添加事件
 
 	|-->while(ev->available)//do while循环
 
+|-->ngx_http_init_connection //(ngx_http_request.c)
+	|-->rev->handler = ngx_http_wait_request_handler // 设置可读回调函数	
+	|-->c->write->handler = ngx_http_empty_handler // 设置可写的回调函数
+	|-->if (rev->ready) //可读
+		|-->rev->handler //(ngx_event_accept.c) 执行回调函数 
+			|-->ngx_http_wait_request_handler //如果上面有可读事件则调用该函数
+
+		|-->return //退出函数
+
+	|-->ngx_add_timer(rev, c->listening->post_accept_timeout) //
+	|-->ngx_reusable_connection(c, 1) //将c插入到reuse链表中,达到重复利用
+	|-->ngx_handle_read_event(rev, 0) //(ngx_event.c) 添加到可读事件中
+		|-->if (ngx_event_flags & NGX_USE_CLEAR_EVENT) //epoll会进入到该分支,在epoll_init你们进行设置
+			|-->if (!rev->active && !rev->ready)
+				|-->ngx_add_event(rev, NGX_READ_EVENT, NGX_CLEAR_EVENT) //添加事件
 
 |-->ngx_http_wait_request_handler //(ngx_http_request.c) accpet后下一阶段的数据处理函数
 	|-->n = c->recv(c, b->last, size) //接收数据
@@ -1216,8 +1217,6 @@ accept状态:
 						|-->ngx_http_close_request(r, NGX_HTTP_REQUEST_TIME_OUT);
 						|-->return;
 
-					|-->
-
 				|-->return;
 
 			|-->if (rc != NGX_AGAIN) //不等于初始化
@@ -1249,7 +1248,6 @@ accept状态:
 	|-->ngx_http_core_run_phases
 	|-->return
 
-	
 |-->ngx_http_update_location_config //(ngx_http_core_module.c)
 				
 |-->ngx_http_process_request_headers //(ngx_http_request.c) 头部数据解析
@@ -1258,26 +1256,27 @@ accept状态:
 	|-->ngx_list_push
 	|-->ngx_hash_find
 	|-->ngx_http_process_request //(ngx_http_request.c)
-		|-->c->read->handler = ngx_http_request_handler
-		|-->c->write->handler = ngx_http_request_handler
-		|-->r->read_event_handler = ngx_http_block_reading
-		|-->ngx_http_handler //(ngx_http_core_module.c)
-			|-->r->write_event_handler = ngx_http_core_run_phases
-			|-->ngx_http_core_run_phases //(ngx_http_core_module.c)
-				|-->while (ph[r->phase_handler].checker)
-					|-->ph[r->phase_handler].checker() //执行checker回调函数
-						|-->ngx_http_core_content_phase //(ngx_http_core_module.c)
-							|-->if (r->content_handler)
-								|-->r->write_event_handler = ngx_http_request_empty_handler
-								|-->ngx_http_finalize_request(r, r->content_handler(r)) 
-									|-->r->content_handler(r) //调用回调函数content_handler
-										|-->ngx_http_memcached_handler //(ngx_http_memcached_module.c)
-								
-								|-->return NGX_OK
-		
-		|-->ngx_http_run_posted_requests //(ngx_http_request.c)
-			|-->r->write_event_handler //(ngx_http_request.c)
-				|-->
+
+|-->ngx_http_process_request //(ngx_http_request.c)
+	|-->c->read->handler = ngx_http_request_handler
+	|-->c->write->handler = ngx_http_request_handler
+	|-->r->read_event_handler = ngx_http_block_reading
+	|-->ngx_http_handler //(ngx_http_core_module.c)
+		|-->r->write_event_handler = ngx_http_core_run_phases
+		|-->ngx_http_core_run_phases //(ngx_http_core_module.c)
+			|-->while (ph[r->phase_handler].checker)
+				|-->ph[r->phase_handler].checker() //执行checker回调函数
+					|-->ngx_http_core_content_phase //(ngx_http_core_module.c)
+						|-->if (r->content_handler)
+							|-->r->write_event_handler = ngx_http_request_empty_handler
+							|-->ngx_http_finalize_request(r, r->content_handler(r)) 
+								|-->r->content_handler(r) //调用回调函数content_handler
+									|-->ngx_http_memcached_handler //(ngx_http_memcached_module.c)
+							
+							|-->return NGX_OK
+	
+	|-->ngx_http_run_posted_requests //(ngx_http_request.c)
+		|-->r->write_event_handler //(ngx_http_request.c)
 
 |-->ngx_http_memcached_handler //(ngx_http_memcached_module.c)
 	|-->ngx_http_discard_request_body //
@@ -1300,13 +1299,6 @@ accept状态:
 			|-->r->write_event_handler = ngx_http_request_empty_handler
 			|-->if (rc == NGX_OK)
 				|-->ngx_http_upstream_cache_send //(ngx_http_upstream.c)
-					|-->u->process_header()
-					|-->ngx_http_upstream_process_headers //()
-					|-->ngx_http_cache_send //(ngx_http_file_cache.c)
-						|-->ngx_http_send_header //
-						|-->ngx_http_output_filter //(ngx_http_core_module.c)
-							|-->ngx_http_top_body_filter //()
-				
 				|-->ngx_http_upstream_cache_background_update
 				
 		|-->u->create_request() //回调函数
@@ -1323,42 +1315,48 @@ accept状态:
 		|-->ngx_resolve_start
 		|-->ctx->handler = ngx_http_upstream_resolve_handler
 		|-->ngx_resolve_name //(ngx_resolver.c)
-			|-->ngx_resolve_name_locked //(ngx_resolver.c)
-				|-->ctx->handler() //回调函数
-					|-->ngx_http_upstream_resolve_handler //(ngx_http_upstream.c)
-						|-->ngx_http_upstream_create_round_robin_peer //
-						|-->ngx_resolve_name_done //(ngx_resolver.c)
-							|-->ngx_resolver_expire //()
-
-						|-->ngx_http_upstream_connect //(ngx_http_upstream.c)
-							|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器
-								|-->ngx_socket
-								|-->ngx_get_connection 
-								|-->ngx_nonblocking
-								|-->connect 
-								|-->ngx_add_event //
-								|-->wev->ready = 1 //
-
-							|-->if (rc == NGX_BUSY) //如果connect连接失败,且错误码为BUSY
-								|-->ngx_http_upstream_next(r, u, NGX_HTTP_UPSTREAM_FT_NOLIVE)
-
-							|-->if (rc == NGX_DECLINED)
-								|-->ngx_http_upstream_next(r, u, NGX_HTTP_UPSTREAM_FT_ERROR)
-
-							|-->c->write->handler = ngx_http_upstream_handler
-							|-->c->read->handler = ngx_http_upstream_handler
-							|-->u->write_event_handler = ngx_http_upstream_send_request_handler
-							|-->u->read_event_handler = ngx_http_upstream_process_header
-							|-->ngx_http_upstream_send_request //(ngx_http_upstream.c)
-								|-->ngx_http_upstream_send_request_body //(ngx_http_upstream.c)
-									|-->ngx_http_read_unbuffered_request_body //(ngx_http_request_body.c)
-										|-->ngx_http_do_read_client_request_body //(ngx_http_request_body.c)
-											|-->
-
-								|-->ngx_handle_write_event//
-
-			|-->return
 				
+|-->ngx_http_upstream_cache_send //(ngx_http_upstream.c)
+	|-->u->process_header()
+	|-->ngx_http_upstream_process_headers //()
+	|-->ngx_http_cache_send //(ngx_http_file_cache.c)
+		|-->ngx_http_send_header //
+		|-->ngx_http_output_filter //(ngx_http_core_module.c)
+			|-->ngx_http_top_body_filter //()
+
+|-->ngx_resolve_name //(ngx_resolver.c)
+	|-->ngx_resolve_name_locked //(ngx_resolver.c)
+		|-->ctx->handler() //回调函数
+			|-->ngx_http_upstream_resolve_handler //(ngx_http_upstream.c)
+
+	|-->return
+
+|-->ngx_http_upstream_resolve_handler //(ngx_http_upstream.c)
+	|-->ngx_http_upstream_create_round_robin_peer //
+	|-->ngx_resolve_name_done //(ngx_resolver.c)
+		|-->ngx_resolver_expire //()
+
+	|-->ngx_http_upstream_connect //(ngx_http_upstream.c)
+
+|-->ngx_http_upstream_connect //(ngx_http_upstream.c)
+	|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器
+	|-->if (rc == NGX_BUSY) //如果connect连接失败,且错误码为BUSY
+		|-->ngx_http_upstream_next(r, u, NGX_HTTP_UPSTREAM_FT_NOLIVE)
+
+	|-->if (rc == NGX_DECLINED)
+		|-->ngx_http_upstream_next(r, u, NGX_HTTP_UPSTREAM_FT_ERROR)
+
+	|-->c->write->handler = ngx_http_upstream_handler
+	|-->c->read->handler = ngx_http_upstream_handler
+	|-->u->write_event_handler = ngx_http_upstream_send_request_handler
+	|-->u->read_event_handler = ngx_http_upstream_process_header
+	|-->ngx_http_upstream_send_request //(ngx_http_upstream.c)
+		|-->ngx_http_upstream_send_request_body //(ngx_http_upstream.c)
+			|-->ngx_http_read_unbuffered_request_body //(ngx_http_request_body.c)
+				|-->ngx_http_do_read_client_request_body //(ngx_http_request_body.c)
+
+		|-->ngx_handle_write_event//
+
 |-->ngx_http_finalize_request //(ngx_http_request.c)
 	|-->r->read_event_handler = ngx_http_block_reading
 	|-->r->write_event_handler = ngx_http_request_empty_handler
@@ -1502,10 +1500,6 @@ accept状态:
 
 |-->ngx_http_core_set_aio //(ngx_http_core_module.c)
 
-ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
-                   "http process request line")
-
-
 |-->ngx_http_filter_finalize_request //(ngx_http_special_response.c)
 
 |-->ngx_thread_read //(ngx_files.c)
@@ -1530,15 +1524,12 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 
 |-->ngx_http_upstream //(ngx_http_upstream.c) 配置文件中"upstream"字段处理函数
 	|-->ngx_http_upstream_add //(ngx_http_upstream.c)
-		|-->
-	
 	|-->ctx = ngx_pcalloc 
 	|-->ctx->srv_conf = ngx_pcalloc
 	|-->ctx->loc_conf = ngx_pcalloc
 	|-->for (m = 0; cf->cycle->modules[m]; m++)
 		|-->if (module->create_srv_conf)
 			|-->module->create_srv_conf(cf)
-				|-->
 			
 		|-->if (module->create_loc_conf)
 			|-->mconf = module->create_loc_conf(cf)
@@ -1547,7 +1538,6 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 	
 |-->ngx_http_upstream_server //(ngx_http_upstream.c) 处理配置文件中"upstream"的子项里面的"server"
 	|-->for (i = 2; i < cf->args->nelts; i++)
-		|-->
 
 
 |-->ngx_stream_block //(ngx_stream.c) nginx.conf文件中stream模块处理方法(与http模块并列)
@@ -1620,7 +1610,7 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 			|-->ph->handler = h[j]
 			|-->ph->next = n, ph++
 
-|-->ngx_stream_optimize_servers //(ngx_stream.c)
+|-->ngx_stream_optimize_servers //(ngx_stream.c) stream模块的解析函数
 	|-->for (p = 0; p < ports->nelts; p++)
 		|-->last = port[p].addrs.nelts
 		|-->while(i < last)
@@ -1630,7 +1620,7 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
 			|-->ngx_stream_add_addrs //
 			|-->ngx_clone_listening //
 
-|-->ngx_stream_init_connection //(ngx_stream_handler.c) tcp/udp负载均衡处理函数,如果定义了该函数这在accept后调用该函数
+|-->ngx_stream_init_connection //(ngx_stream_handler.c) tcp/udp负载均衡处理函数,该函数这在accept后调用该函数
 	|-->rev->handler = ngx_stream_session_handler
 	|-->if (addr_conf->proxy_protocol)
 		|-->rev->handler = ngx_stream_proxy_protocol_handler
