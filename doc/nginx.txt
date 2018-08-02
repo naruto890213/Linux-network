@@ -1527,6 +1527,20 @@ accept状态:
 |-->ngx_http_upstream_server //(ngx_http_upstream.c) 处理配置文件中"upstream"的子项里面的"server"
 	|-->for (i = 2; i < cf->args->nelts; i++)
 
+|-->ngx_stream_upstream_init_main_conf //(ngx_stream_upstream.c) stream主配置初始化函数
+	|-->for (i = 0; i < umcf->upstreams.nelts; i++)
+		|-->init = uscfp[i]->peer.init_upstream
+                                         ? uscfp[i]->peer.init_upstream
+                                         : ngx_stream_upstream_init_round_robin 
+
+		|-->init(cf, uscfp[i]) //init初始化函数
+			|-->ngx_stream_upstream_init_round_robin //默认情况下为rr算法模块
+
+|-->ngx_stream_upstream_init_round_robin //(ngx_stream_upstream_round_robin.c) rr算法初始化函数
+	|-->us->peer.init = ngx_stream_upstream_init_round_robin_peer //设置节点初始化函数,在后面的初始化中会用到
+	|-->if (us->servers) //是否定义了server模块,默认情况下会进入该分支
+		|-->peers->single = 0 //将用于后面的获取peer节点函数
+		|-->backup->single = 0
 
 |-->ngx_stream_block //(ngx_stream.c) nginx.conf文件中stream模块处理方法(与http模块并列)
 	|-->ngx_stream_max_module = ngx_count_modules(cf->cycle, NGX_STREAM_MODULE) //获取stream模块的个数
@@ -1658,13 +1672,15 @@ accept状态:
 
 found:
 	|-->uscf->peer.init(s, uscf)
-		|-->ngx_stream_upstream_init_round_robin_peer //(ngx_stream_upstream_round_robin.c)
-			|-->s->upstream->peer.get = ngx_stream_upstream_get_round_robin_peer
-			|-->s->upstream->peer.free = ngx_stream_upstream_free_round_robin_peer
-			|-->s->upstream->peer.notify = ngx_stream_upstream_notify_round_robin_peer
-			|-->s->upstream->peer.tries = ngx_stream_upstream_tries(rrp->peers)
+		|-->ngx_stream_upstream_init_round_robin_peer //默认为rr算法
 
 	|-->ngx_stream_proxy_connect //连接后端服务器
+
+|-->ngx_stream_upstream_init_round_robin_peer //(ngx_stream_upstream_round_robin.c) rr算法初始化
+	|-->s->upstream->peer.get = ngx_stream_upstream_get_round_robin_peer
+	|-->s->upstream->peer.free = ngx_stream_upstream_free_round_robin_peer
+	|-->s->upstream->peer.notify = ngx_stream_upstream_notify_round_robin_peer
+	|-->s->upstream->peer.tries = ngx_stream_upstream_tries(rrp->peers)
 
 |-->ngx_stream_proxy_downstream_handler //(ngx_stream_proxy_module.c) 负载均衡server的接收处理函数
 	|-->ngx_stream_proxy_process_connection //负载均衡连接函数
@@ -1688,7 +1704,6 @@ found:
 |-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器
 	|-->rc = pc->get(pc, pc->data) //根据不同的负载均衡模块回调函数
 		|-->ngx_stream_upstream_get_round_robin_peer //对后端服务器进行选择,进行负载均衡处理
-			|-->ngx_stream_upstream_get_round_robin_peer //获取对端的连接信息
 				
 		|-->ngx_socket //创建socket
 		|-->ngx_get_connection //
@@ -1719,7 +1734,7 @@ found:
 		|-->rrp->current = peer
 		
 	|-->else //peers->single为0
-		|-->ngx_stream_upstream_get_peer //
+		|-->ngx_stream_upstream_get_peer //获取peer节点
 		|-->if (peer == NULL)
 			|-->goto failed
 	
@@ -1737,6 +1752,43 @@ failed://上面获取peer失败进入该分支
 		
 	|-->ngx_stream_upstream_rr_peers_unlock //解锁
 	|-->return NGX_BUSY //异常情况下进入该状态
+
+|-->ngx_stream_upstream_get_peer //(ngx_stream_upstream_round_robin.c) 获取对端的连接状态
+	|-->best = NULL //最佳节点
+	|-->total = 0
+	|-->for (peer = rrp->peers->peer, i = 0; peer;peer = peer->next, i++) //对所有连接进行轮训
+		|-->n = i / (8 * sizeof(uintptr_t))
+		|-->m = (uintptr_t) 1 << i % (8 * sizeof(uintptr_t)) 
+		|-->if (rrp->tried[n] & m)
+			|-->continue
+
+		|-->if (peer->down)
+			|-->continue
+
+		|-->if (peer->max_conns && peer->conns >= peer->max_conns)
+			|-->continue
+
+		|-->peer->current_weight += peer->effective_weight
+		|-->total += peer->effective_weight
+		|-->if (peer->effective_weight < peer->weight)
+			|-->peer->effective_weight++
+
+		|-->if (best == NULL || peer->current_weight > best->current_weight)
+			|-->best = peer
+			|-->p = i
+
+	|-->if (best == NULL) //如果上面的轮训没有得到合适的节点
+		|-->return NULL //直接返回空节点
+
+	|-->rrp->current = best //将最佳节点赋值给当前节点
+	|-->n = p / (8 * sizeof(uintptr_t))
+	|-->m = (uintptr_t) 1 << p % (8 * sizeof(uintptr_t))
+	|-->rrp->tried[n] |= m
+	|-->best->current_weight -= total
+	|-->if (now - best->checked > best->fail_timeout) //检查超时时间
+		|-->best->checked = now
+
+	|-->return best //返回最佳节点
 
 |-->ngx_add_timer(pc->write, pscf->connect_timeout) //添加到超时处理队列中
 	|-->ngx_event_add_timer //(ngx_event.h)
