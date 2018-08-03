@@ -512,24 +512,20 @@ accept状态:
 		|-->ls = cycle->listening.elts
 		|-->for (i = 0; i < cycle->listening.nelts; i++) //进不去，nelts的值为0
 		
-|-->ngx_preinit_modules //(ngx_module.c)
+|-->ngx_preinit_modules //(ngx_module.c) 预初始化nginx的各个模块，根据configure配置生成
 	|-->for (i = 0; ngx_modules[i]; i++) //获取
 		|-->ngx_modules[i]->index = i;
 		|-->ngx_modules[i]->name = ngx_module_names[i];
 
 	|-->ngx_modules_n = i //统计当前的module数量，用于后面的拷贝复制
-	|-->ngx_max_module = ngx_modules_n + NGX_MAX_DYNAMIC_MODULES
+	|-->ngx_max_module = ngx_modules_n + NGX_MAX_DYNAMIC_MODULES //最大数量由静态和动态模块组成
 		
 |-->ngx_init_cycle //(ngx_cycle.c) nginx的主初始化函数
 	|-->ngx_array_init(&cycle->listening, pool, n, sizeof(ngx_listening_t) //初始化listening
 	|-->ngx_memzero(cycle->listening.elts, n * sizeof(ngx_listening_t))
 	|-->ngx_queue_init(&cycle->reusable_connections_queue) //对队列进行初始化
 	|-->cycle->conf_ctx = ngx_pcalloc(pool, ngx_max_module * sizeof(void *)) //分配空间
-	
-	|-->ngx_cycle_modules //(ngx_module.c)
-		|-->cycle->modules = ngx_pcalloc(cycle->pool, (ngx_max_module + 1) * sizeof(ngx_module_t *)) //分配空间
-		|-->ngx_memcpy(cycle->modules, ngx_modules, ngx_modules_n * sizeof(ngx_module_t *)) //将全局module拷贝到cycle->modules
-		|-->cycle->modules_n = ngx_modules_n //当前module的数量
+	|-->ngx_cycle_modules //分配空间，将模块复制给全局空间中
 	
 	|-->for (i = 0; cycle->modules[i]; i++) //对modules进行轮训判断其type值
 		|-->if (cycle->modules[i]->type != NGX_CORE_MODULE) //对modules进行轮训判断其type值
@@ -537,19 +533,8 @@ accept状态:
 		
 		|-->module = cycle->modules[i]->ctx //获取结构体中ngx_event_module_t成员, 本次分析以ngx_event_core_module_ctx为例子
 		|-->if (module->create_conf) //如果create_conf回调函数存在则调用回调
-			module->create_conf //调用关联模块的回调函数
-				|-->case ngx_core_module: //核心模块
-					|-->ngx_core_module_create_conf //(nginx.c)
-						|-->ccf->daemon = NGX_CONF_UNSET //初始化
-						|-->ccf->master = NGX_CONF_UNSET //初始化
-						|-->ccf->worker_processes = NGX_CONF_UNSET 
-						
-				|-->case ngx_regex_module: //反向连接模块
-					|-->ngx_regex_create_conf //(ngx_regex.c)
-					
-				|-->case ngx_thread_pool_module: //线程池模块
-					|-->ngx_thread_pool_create_conf //(ngx_thread_pool.c)
-	
+			module->create_conf() //调用关联模块的create_conf回调函数
+
 	|-->conf.args = ngx_array_create(pool, 10, sizeof(ngx_str_t)) 
 	|-->conf.temp_pool = ngx_create_pool(NGX_CYCLE_POOL_SIZE, log)
 	
@@ -559,30 +544,16 @@ accept状态:
 	|-->ngx_conf_parse //(ngx_conf_file.c) 解析配置文件
 	|-->for (i = 0; cycle->modules[i]; i++) //对全局modules指针数组进行轮巡
 		|-->if (cycle->modules[i]->type != NGX_CORE_MODULE)
-			|-->continue //只要type=NGX_CORE_MODULE的module
+			|-->continue //过滤掉type != NGX_CORE_MODULE的module模块
 			
 		|-->module = cycle->modules[i]->ctx 
 		|-->if (module->init_conf) //如果create_conf回调函数存在则调用回调
 			|-->module->init_conf //调用各个关联模块的init_conf回调函数
-				|-->case ngx_core_module:
-					|-->ngx_core_module_init_conf //(ngx_event.c)
-						|-->ngx_conf_init_value(ccf->daemon, 1)
-						|-->ngx_conf_init_value(ccf->master, 1) //(ngx_conf_file.h)
-							|-->if (conf == NGX_CONF_UNSET)
-								|-->ccf->master = 1 //设置master的值为1，该值在后面用来判断ngx_process工作类型
-								
-						|-->ngx_conf_init_value(ccf->worker_processes, 1) //将worker_processes的值设置为1
-						
-				|-->case ngx_regex_module:
-					|-->ngx_regex_init_conf //()
-				
-				|-->ngx_events_module:
-					|-->ngx_event_init_conf //(ngx_event.c)
-						|-->ngx_get_conf(cycle->conf_ctx, ngx_events_module) //(ngx_event.c)
-							|-->return conf_ctx[module.index] //(ngx_conf_file.h)
-		
-				|-->ngx_thread_pool_module //线程池模块
-					|-->ngx_thread_pool_init_conf //(ngx_thread_pool.c)
+					
+|-->ngx_cycle_modules //(ngx_module.c)分配空间，将模块复制给全局空间中
+	|-->cycle->modules = ngx_pcalloc(cycle->pool, (ngx_max_module + 1) * sizeof(ngx_module_t *)) //分配空间
+	|-->ngx_memcpy(cycle->modules, ngx_modules, ngx_modules_n * sizeof(ngx_module_t *)) //将全局module拷贝到cycle->modules
+	|-->cycle->modules_n = ngx_modules_n //当前module的数量
 
 |-->ngx_init_signals //(ngx_process.c) 信号初始化函数
 	|-->for (sig = signals; sig->signo != 0; sig++) //对signals数组进行遍历，并设置其signal信号执行函数
@@ -655,18 +626,16 @@ accept状态:
 |-->ngx_conf_handler //(ngx_conf_file.c) 配置文件处理函数(根据配置来设置不同的回调函数)
 	|-->name = cf->args->elts
 	|-->for (i = 0; cf->cycle->modules[i]; i++)
-		|-->cmd = cf->cycle->modules[i]->commands //获取所有modules模块的cmd命令
+		|-->cmd = cf->cycle->modules[i]->commands //轮训所有的加载模块
 		|-->if (cmd == NULL)
 			|-->continue
 			
-		|-->for ( /* void */ ; cmd->name.len; cmd++)
+		|-->for ( /* void */ ; cmd->name.len; cmd++) //对模块的关键字进行轮训处理
 			|-->if (name->len != cmd->name.len)
 				|-->continue
 				
-			|-->if (ngx_strcmp(name->data, cmd->name.data) != 0)
+			|-->if (ngx_strcmp(name->data, cmd->name.data) != 0) 如果关键词不匹配则跳过
 				|-->continue
-				
-			|-->found = 1
 			
 			|-->if (cf->cycle->modules[i]->type != NGX_CONF_MODULE && cf->cycle->modules[i]->type != cf->module_type)
 				|-->continue
@@ -678,23 +647,14 @@ accept状态:
 				|-->return NGX_ERROR
 				
 			|-->cmd->set(cf, cmd, conf) //调用cmd中的set回调函数，主要是根据配置文件中的关键字进行程序初始化
-				|-->case ngx_http_commands: //http的cmd
-					|-->ngx_http_block // 主要是解析http相关的配置文件和设置accpet的回调函数
-
-				|-->case ngx_http_core_commands: 
-					|-->case "server":
-						|-->ngx_http_core_server //配置文件中server字段的处理函数
-
-					|-->case "listen":
-						|-->ngx_http_core_listen //(ngx_http_core_module.c)
 		
-|-->ngx_master_process_cycle //(ngx_process_cycle.c)
+|-->ngx_master_process_cycle //(ngx_process_cycle.c)nginx的主执行函数
 	|-->ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module) //获取conf_ctx[0]
 	|-->ngx_start_worker_processes //启动工作进程, 进程数量来自配置文件
 	|-->ngx_start_cache_manager_processes(cycle, 0) //(ngx_process_cycle.c)
 	|-->for ( ;; ) //父进程进入loop循环	
 	
-|-->ngx_start_worker_processes //(ngx_process_cycle.c)
+|-->ngx_start_worker_processes //(ngx_process_cycle.c) 工作进程主函数
 	|-->for (i = 0; i < n; i++) //worker_processes的数值来自nginx.conf文件的配置,默认为1
 		|-->ngx_spawn_process //创建进程,并使用传入的函数作为进程执行函数
 			|-->ngx_process_slot = s
@@ -724,44 +684,7 @@ accept状态:
 	|-->for ( ;; ) //进入loop
 		|-->ngx_process_events_and_timers //(ngx_event.c) //nginx的数据处理，其函数见下面的函数说明
 
-
-|-->ngx_conf_handler //(ngx_conf_file.c) 配置文件的处理函数,根据配置文件中不同字段调用不同的处理函数
-	|-->name = cf->args->elts
-	|-->for (i = 0; cf->cycle->modules[i]; i++)
-		|-->cmd = cf->cycle->modules[i]->commands //获取所有modules模块的cmd命令
-		|-->if (cmd == NULL)
-			|-->continue
-			
-		|-->for ( /* void */ ; cmd->name.len; cmd++)
-			|-->if (name->len != cmd->name.len)
-				|-->continue
-				
-			|-->if (ngx_strcmp(name->data, cmd->name.data) != 0)
-				|-->continue
-				
-			|-->found = 1
-			
-			|-->if (cf->cycle->modules[i]->type != NGX_CONF_MODULE && cf->cycle->modules[i]->type != cf->module_type)
-				|-->continue
-	
-			|-->if (!(cmd->type & cf->cmd_type))
-				|-->continue
-				
-			|-->if ((cmd->type & NGX_CONF_BLOCK) && last != NGX_CONF_BLOCK_START)
-				|-->return NGX_ERROR
-				
-			|-->cmd->set(cf, cmd, conf) //调用cmd中的set回调函数
-				|-->case ngx_http_commands: //http的cmd
-					|-->ngx_http_block // 主要是解析http相关的配置文件和设置accpet的回调函数
-
-				|-->case ngx_http_core_commands: 
-					|-->case "server":
-						|-->ngx_http_core_server //配置文件中server字段的处理函数
-
-					|-->case "listen":
-						|-->ngx_http_core_listen //(ngx_http_core_module.c)
-
-|-->ngx_http_block //(ngx_http.c)
+|-->ngx_http_block //(ngx_http.c) http模块的set回调函数
 	|-->ngx_http_max_module = ngx_count_modules //获取模块中type为NGX_HTTP_MODULE的个数
 	|-->ctx->main_conf = ngx_pcalloc //预分配ngx_http_max_module个void型的指针数据
 	|-->ctx->srv_conf = ngx_pcalloc //预分配ngx_http_max_module个void型的指针数据
@@ -988,7 +911,7 @@ accept状态:
 				|-->case "ngx_posted_events": //处理可写事件
 
 
-|-->ngx_event_expire_timers //(ngx_event_timer.c) 时间处理函数
+|-->ngx_event_expire_timers //(ngx_event_timer.c) 时间队列处理函数
 	|-->sentinel = ngx_event_timer_rbtree.sentinel
 	|-->for ( ;; )
 		|-->root = ngx_event_timer_rbtree.root
@@ -1006,27 +929,6 @@ accept状态:
 		|-->ev->handler(ev) //定时器列表的回调函数, 处理通过ngx_add_timer添加的队列
 
 |-->ngx_event_core_init_conf //(ngx_event.c)
-
-|-->ngx_conf_parse //(ngx_conf_file.c) 参数解析函数，用于解析nginx的配置文件及传入参数
-	|-->ngx_conf_handler //(ngx_conf_file.c)
-		|-->ngx_events_block //(ngx_event.c)
-			|-->for (i = 0; cf->cycle->modules[i]; i++)
-				|-->if (cf->cycle->modules[i]->type != NGX_EVENT_MODULE)
-					|-->continue
-		
-				|-->m = cf->cycle->modules[i]->ctx
-				|-->if (m->create_conf)
-					|-->m->create_conf //()
-		
-			|-->ngx_conf_parse//
-		
-			|-->for (i = 0; cf->cycle->modules[i]; i++)
-				|-->if (cf->cycle->modules[i]->type != NGX_EVENT_MODULE)
-					|-->continue
-		
-				|-->m = cf->cycle->modules[i]->ctx
-				|-->if (m->init_conf)
-					|-->m->init_conf //(ngx_event.c)
 		
 |-->ngx_event_process_init //(ngx_event.c) event模块的初始化函数,根据不同的分类进行子模块的初始化工作和一些绑定关系的设置
 	|-->if(ccf->master && ccf->worker_processes > 1 && ecf->accept_mutex) //ecf->accept_mutex默认为0不会进入该分支
@@ -1903,7 +1805,6 @@ failed://上面获取peer失败进入该分支
 |-->ngx_stream_upstream //(ngx_stream_upstream.c)
 	|-->module->create_srv_conf()
 	|-->ngx_conf_parse //
-	|-->
 
 |-->ngx_stream_upstream_least_conn //(ngx_stream_upstream_least_conn_module.c)
 	|-->uscf->peer.init_upstream = ngx_stream_upstream_init_least_conn //
