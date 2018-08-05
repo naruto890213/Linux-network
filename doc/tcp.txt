@@ -601,15 +601,45 @@ reset_and_undo:
 	|-->SYSCALL_DEFINE3(connect, int, fd, struct sockaddr __user *, uservaddr, int, addrlen)//(net/socket.c)
 		|-->sock->ops->connect //(socket.c)
 			|-->inet_stream_connect //(af_inet.c)
-				|-->__inet_stream_connect(sock, uaddr, addr_len, flags, 0) //(af_inet.c)
-					|-->switch(sock->state)
-						|-->case SS_UNCONNECTED //初始状态为该状态
-							|-->sk->sk_prot->connect //(af_inet.c)
-								|-->tcp_v4_connect //(tcp_ipv4.c) tcp的connect实际处理函数
-									
-							|-->sock->state = SS_CONNECTING //(af_inet.c)
-							|-->sock_sndtimeo //()
+				|-->__inet_stream_connect(sock, uaddr, addr_len, flags, 0) //ip层的connect系统调用
 							
+|-->__inet_stream_connect //(af_inet.c)ip层connect的调用函数
+	|-->switch(sock->state)
+		|-->case SS_UNCONNECTED //初始状态为该状态
+			|-->err = sk->sk_prot->connect(sk, uaddr, addr_len) //(af_inet.c) 调用具体协议的connect回调函数
+				|-->tcp_v4_connect //(tcp_ipv4.c) tcp的connect实际处理函数
+					
+			|-->if (err < 0)
+				return err;
+
+			|-->if (!err && inet_sk(sk)->defer_connect)
+				return err;
+
+			|-->sock->state = SS_CONNECTING //(af_inet.c)
+			|-->err = -EINPROGRESS //否则返回该错误码
+			|-->break
+
+	|-->timeo = sock_sndtimeo(sk, flags & O_NONBLOCK) //判断是否为NONBLOCK
+	|-->if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV))
+		|-->if (!timeo || !inet_wait_for_connect(sk, timeo, writebias))
+			|-->return err
+
+		|-->err = sock_intr_errno(timeo)
+		|-->if (signal_pending(current))
+			|-->return err
+
+	|-->if (sk->sk_state == TCP_CLOSE) 
+		|-->return err
+
+	|-->sock->state = SS_CONNECTED
+	|-->err = 0
+	|-->return err;
+
+|-->sock_sndtimeo //(sock.h) 判断是否为非阻塞socket
+	|-->return noblock ? 0 : sk->sk_sndtimeo //如果为非阻塞则返回0,否则返回sk_sndtimeo
+
+|-->inet_wait_for_connect //(af_inet.c)
+
 |-->tcp_v4_connect //(tcp_ipv4.c) tcp的connect处理函数
 	|-->ip_route_connect //()
 	|-->sk_rcv_saddr_set //()
@@ -617,11 +647,7 @@ reset_and_undo:
 	|-->tcp_set_state(sk, TCP_SYN_SENT) //(net/ipv4/tcp.c) 设置sk的状态为TCP_SYN_SENT
 	|-->inet_hash_connect //(inet_hashtables.c)
 		|-->__inet_check_established //(inet_hashtables.c)
-			|-->twsk_unique //(timewait_sock.h)
-				|-->if (sk->sk_prot->twsk_prot->twsk_unique != NULL)
-					|-->sk->sk_prot->twsk_prot->twsk_unique //(timewait_sock.h) 调用的实际函数为tcp_twsk_unique
-						|-->tcp_twsk_unique //(tcp_ipv4.c)
-							|-->init_net.ipv4.sysctl_tcp_tw_reuse //(/proc/sys/net/ipv4/tcp_tw_reuse) 如果该变量开启后会将time_wait重用, 该值只使用于client端
+			|-->twsk_unique //(timewait_sock.h)参见下面的函数实现
 
 	|-->sk_set_txhash //()
 	|-->ip_route_newports //()
@@ -642,14 +668,19 @@ reset_and_undo:
 
 	|-->tcp_connect //tcp的connect数据处理函数，包含SYN的发送和超时处理
 			
+|-->twsk_unique //(timewait_sock.h)
+	|-->if (sk->sk_prot->twsk_prot->twsk_unique != NULL)
+		|-->sk->sk_prot->twsk_prot->twsk_unique //(timewait_sock.h) 调用的实际函数为tcp_twsk_unique
+			|-->tcp_twsk_unique //(tcp_ipv4.c)
+				|-->init_net.ipv4.sysctl_tcp_tw_reuse //(/proc/sys/net/ipv4/tcp_tw_reuse) 该变量开启后会将time_wait重用, 该值只使用于client端
+
 |-->tcp_connect //(tcp_output.c) Build a SYN and send it off 
 	|-->tcp_connect_init //(tcp_output.c)
 	|-->tcp_init_nondata_skb(buff, tp->write_seq++, TCPHDR_SYN) //(tcp_output.c) 设置tcp_flags为SYN，为传输构造函数做准备
 	|-->tcp_mstamp_refresh //()													
 	|-->tp->retrans_stamp = tcp_time_stamp(tp) //								
-	|-->tcp_connect_queue_skb //(tcp_output.c)																											
-	|-->tcp_ecn_send_syn //(tcp_output.c)																											
-																				
+	|-->tcp_connect_queue_skb //(tcp_output.c)																				
+	|-->tcp_ecn_send_syn //(tcp_output.c)																					
 	|-->tp->fastopen_req ? tcp_send_syn_data(sk, buff) :						
 			tcp_transmit_skb(sk, buff, 1, sk->sk_allocation)//(tcp_output.c)	
 			
@@ -658,7 +689,6 @@ reset_and_undo:
 			|-->tcp_transmit_skb //(tcp_output.c)								
 				|-->if (unlikely(tcb->tcp_flags & TCPHDR_SYN)) //(tcp_output.c)
 					|-->tcp_syn_options //(tcp_output.c)
-						|-->
 				
 				|-->else
 					|-->tcp_established_options //

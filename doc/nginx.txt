@@ -527,7 +527,7 @@ accept状态:
 	|-->cycle->conf_ctx = ngx_pcalloc(pool, ngx_max_module * sizeof(void *)) //分配空间
 	|-->ngx_cycle_modules //分配空间，将模块复制给全局空间中
 	
-	|-->for (i = 0; cycle->modules[i]; i++) //对modules进行轮训判断其type值
+	|-->for (i = 0; cycle->modules[i]; i++) //对modules进行轮训,对NGX_CORE_MODULE的模块调用create_conf函数
 		|-->if (cycle->modules[i]->type != NGX_CORE_MODULE) //对modules进行轮训判断其type值
 			|-->continue //只要type=NGX_CORE_MODULE的module
 		
@@ -542,7 +542,7 @@ accept状态:
 	|-->conf.cmd_type = NGX_MAIN_CONF
 	|-->ngx_conf_param //(ngx_conf_file.c) 执行参数的解析
 	|-->ngx_conf_parse //(ngx_conf_file.c) 解析配置文件
-	|-->for (i = 0; cycle->modules[i]; i++) //对全局modules指针数组进行轮巡
+	|-->for (i = 0; cycle->modules[i]; i++) //对全局modules指针数组进行轮巡,对NGX_CORE_MODULE模块进行init_conf调用
 		|-->if (cycle->modules[i]->type != NGX_CORE_MODULE)
 			|-->continue //过滤掉type != NGX_CORE_MODULE的module模块
 			
@@ -1435,8 +1435,7 @@ accept状态:
 
 |---------------------------http负载均衡模块主要函数解析 end ---------------------------|
 	
-|-------------------------tcp/udp负载均衡模块主要函数解析 start-------------------------|
-
+|-------------------------tcp/udp负载均衡模块主要函数解析 start-------------------------{
 |-->ngx_stream_upstream_init_main_conf //(ngx_stream_upstream.c) stream主配置初始化函数
 	|-->for (i = 0; i < umcf->upstreams.nelts; i++)
 		|-->init = uscfp[i]->peer.init_upstream
@@ -1449,8 +1448,29 @@ accept状态:
 |-->ngx_stream_upstream_init_round_robin //(ngx_stream_upstream_round_robin.c) rr算法初始化函数
 	|-->us->peer.init = ngx_stream_upstream_init_round_robin_peer //设置节点初始化函数,在后面的初始化中会用到
 	|-->if (us->servers) //是否定义了server模块,默认情况下会进入该分支
-		|-->peers->single = 0 //将用于后面的获取peer节点函数
-		|-->backup->single = 0
+		|-->server = us->servers->elts //upstream中定义的server数组
+		for (i = 0; i < us->servers->nelts; i++)//统计server的个数
+			|-->n += server[i].naddrs
+			|-->w += server[i].naddrs * server[i].weight
+
+		|-->if (n == 0) //位定义server则直接退出
+			|-->return NGX_ERROR;
+
+		|-->peers = ngx_pcalloc //分配空间
+		|-->peer = ngx_pcalloc //分配空间
+		|-->peers->single = (n == 1) //设置single数值,将用于后面获取端点时所用
+		|-->peers->number = n //统计端点个数
+		|-->peers->weighted = (w != n)
+		|-->peers->total_weight = w
+		|-->peers->name = &us->host //获取名称
+		|-->n = 0
+		|-->peerp = &peers->peer
+		|-->for (i = 0; i < us->servers->nelts; i++)
+			|-->for (j = 0; j < server[i].naddrs; j++)
+				|-->*peerp = &peer[n]
+				|-->peerp = &peer[n].next
+
+	|-->us->peer.data = peers //将peers与data关联起来,在后面get_peer中将用到
 		
 	|-->for (i = 0; i < u.naddrs; i++)//对子节点进行轮训
 		|-->peer[i].weight = 1
@@ -1505,7 +1525,7 @@ accept状态:
 
 	|-->ngx_stream_init_phase_handlers //stream模块的解析处理函数
 	|-->for (i = 0; i < cmcf->listen.nelts; i++)
-		|-->ngx_stream_add_ports //
+		|-->ngx_stream_add_ports //增加listen端口,用于监听所用
 
 	|-->ngx_stream_optimize_servers //(ngx_stream.c)
 
@@ -1529,6 +1549,13 @@ accept状态:
 			|-->ph->checker = checker
 			|-->ph->handler = h[j]
 			|-->ph->next = n, ph++
+
+|-->ngx_stream_add_ports //(ngx_stream.c) 增加监听端口
+	|-->sa = &listen->sockaddr.sockaddr
+	|-->p = ngx_inet_get_port(sa);
+	|-->port = ports->elts
+	|-->for (i = 0; i < ports->nelts; i++)
+		|-->
 
 |-->ngx_stream_optimize_servers //(ngx_stream.c) stream模块的解析函数
 	|-->for (p = 0; p < ports->nelts; p++)
@@ -1592,9 +1619,25 @@ found:
 	|-->uscf->peer.init(s, uscf)
 		|-->ngx_stream_upstream_init_round_robin_peer //默认为rr算法
 
-	|-->ngx_stream_proxy_connect //连接后端服务器
+	|-->ngx_stream_proxy_connect //连接后端服务器,选择后端peer和处理连接结果
 
 |-->ngx_stream_upstream_init_round_robin_peer //(ngx_stream_upstream_round_robin.c) rr算法初始化
+	|-->rrp = s->upstream->peer.data //在ngx_stream_upstream_init_round_robin中定义
+	|-->if (rrp == NULL) //如果为空
+		|-->rrp = ngx_palloc //重新进行分配
+		|-->s->upstream->peer.data = rrp //并将rrp赋值给data用于下次使用
+
+	|-->n = rrp->peers->number
+	|-->if (n <= 8 * sizeof(uintptr_t))
+		|-->rrp->tried = &rrp->data
+		|-->rrp->data = 0
+
+	|-->else //n大于8*sizeof(uintptr_t)
+		|-->n = (n + (8 * sizeof(uintptr_t) - 1)) / (8 * sizeof(uintptr_t))
+		|-->rrp->tried = ngx_pcalloc(s->connection->pool, n * sizeof(uintptr_t))
+		|-->if (rrp->tried == NULL)
+			|-->return NGX_ERROR; //分配失败则直接退出
+
 	|-->s->upstream->peer.get = ngx_stream_upstream_get_round_robin_peer
 	|-->s->upstream->peer.free = ngx_stream_upstream_free_round_robin_peer
 	|-->s->upstream->peer.notify = ngx_stream_upstream_notify_round_robin_peer
@@ -1614,7 +1657,19 @@ found:
 	|-->ngx_stream_proxy_process(s, from_upstream, ev->write) //stream负载均衡主函数
 	
 |-->ngx_stream_proxy_connect //(ngx_stream_proxy_module.c) 负载均衡选择连接后端服务器
-	|-->ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器 
+	|-->rc = ngx_event_connect_peer //(ngx_event_connect.c)连接后端服务器 
+	|-->if (rc == NGX_ERROR) //如果connect返回错误则终止该连接
+		|-->ngx_stream_proxy_finalize(s, NGX_STREAM_INTERNAL_SERVER_ERROR)
+		|-->return
+
+	|-->if (rc == NGX_BUSY) //如果返回的错误码为BUSY返回错误码并终止连接
+		|-->ngx_stream_proxy_finalize(s, NGX_STREAM_BAD_GATEWAY)
+		|-->return
+
+	|-->if (rc == NGX_DECLINED)//再次进入connect
+		|-->ngx_stream_proxy_next_upstream(s)//再次进入connect
+		|-->return
+
 	|-->pc->read->handler = ngx_stream_proxy_connect_handler 
 	|-->pc->write->handler = ngx_stream_proxy_connect_handler
 	|-->ngx_add_timer(pc->write, pscf->connect_timeout) //添加到超时处理队列中,最终会在ngx_event_expire_timers中被处理
@@ -1623,20 +1678,59 @@ found:
 	|-->rc = pc->get(pc, pc->data) //根据不同的负载均衡模块回调函数
 		|-->ngx_stream_upstream_get_round_robin_peer //对后端服务器进行选择,进行负载均衡处理
 				
-		|-->ngx_socket //创建socket
-		|-->ngx_get_connection //
-		|-->ngx_nonblocking //设置为非阻塞
+	|-->ngx_socket //创建socket
+	|-->ngx_get_connection //获取一个可用的connection节点,用于保存数据
+	|-->ngx_nonblocking //设置为非阻塞
+	
+	|-->if (type == SOCK_STREAM)
+		|-->c->recv = ngx_recv
+		|-->c->send = ngx_send
+		|-->c->recv_chain = ngx_recv_chain
+		|-->c->send_chain = ngx_send_chain
 		
-		|-->if (type == SOCK_STREAM)
-			|-->c->recv = ngx_recv
-			|-->c->send = ngx_send
-			|-->c->recv_chain = ngx_recv_chain
-			|-->c->send_chain = ngx_send_chain
-			
-		|-->ngx_add_conn //添加到可读事件中
-			|-->ngx_event_actions.add_conn //添加到epoll监听中
-			
-		|-->connect //连接对端,由于是非阻塞所以第一次连接可能会失败
+	|-->ngx_add_conn //添加到可读事件中
+		|-->ngx_event_actions.add_conn //添加到epoll监听中
+		
+	|-->rc = connect //连接对端,由于是非阻塞所以第一次连接可能会失败
+	|-->if (rc == -1)
+		|-->err = ngx_socket_errno //记录错误码
+		|-->if (err != NGX_EINPROGRESS)
+			|-->ngx_close_connection()
+			|-->pc->connection = NULL
+			|-->return NGX_DECLINED //重新连接
+
+	|-->if (ngx_add_conn) //如果定义了ngx_add_conn(默认是定义的,所以会进入该分支)
+		|-->if (rc == -1)
+			|-->return NGX_AGAIN //重试,默认情况下返回该值
+
+		|-->wev->ready = 1 //设置可读
+		|-->return NGX_OK
+
+	|-->if (ngx_event_flags & NGX_USE_IOCP_EVENT)
+		|-->if (ngx_blocking(s) == -1)
+			goto failed
+
+		|-->rev->ready = 1
+		|-->wev->ready = 1
+		|-->return NGX_OK
+
+	|-->if (ngx_event_flags & NGX_USE_CLEAR_EVENT)
+		|-->event = NGX_CLEAR_EVENT
+	|-->else
+		|-->event = NGX_LEVEL_EVENT
+
+	|-->ngx_add_event(rev, NGX_READ_EVENT, event) //添加可读事件
+	|-->if (rc == -1) 
+		|-->ngx_add_event(wev, NGX_WRITE_EVENT, event) //添加可写事件
+		|-->return NGX_AGAIN
+
+	|-->wev->ready = 1
+	|-->return NGX_OK
+
+failed://如果失败则跳转到该处
+	|-->ngx_close_connection 
+	|-->pc->connection = NULL
+	|-->return NGX_ERROR //返回错误
 		
 |-->ngx_stream_upstream_get_round_robin_peer //(ngx_stream_upstream_round_robin.c) rr算法的负载均衡查找函数
 	|-->peers = rrp->peers 
@@ -1729,6 +1823,10 @@ failed://上面获取peer失败进入该分支
 |-->ngx_stream_proxy_init_upstream //(ngx_stream_proxy_module.c)
 	|-->ngx_tcp_nodelay //
 	|-->ngx_connection_local_sockaddr //
+	|-->u->state->connect_time = ngx_current_msec - u->state->response_time //connect超时时间
+	|-->if (u->peer.notify) //调用peer的notify回调函数
+		|-->u->peer.notify(&u->peer, u->peer.data,
+                       NGX_STREAM_UPSTREAM_NOTIFY_CONNECT) //实际调用的是ngx_stream_upstream_notify_round_robin_peer
 	|-->pc->read->handler = ngx_stream_proxy_upstream_handler //
 	|-->pc->write->handler = ngx_stream_proxy_upstream_handler //
 	
@@ -1736,6 +1834,18 @@ failed://上面获取peer失败进入该分支
 		|-->ngx_post_event(pc->read, &ngx_posted_events)
 		
 	|-->ngx_stream_proxy_process //proxy处理函数
+
+|-->ngx_stream_upstream_notify_round_robin_peer //(ngx_stream_upstream_round_robin.c)
+	|-->ngx_stream_upstream_rr_peer_data_t  *rrp = data
+	|-->peer = rrp->current
+	|-->if (type == NGX_STREAM_UPSTREAM_NOTIFY_CONNECT && pc->connection->type == SOCK_STREAM)
+		|-->ngx_stream_upstream_rr_peers_rlock
+		|-->ngx_stream_upstream_rr_peer_lock
+		|-->if (peer->accessed < peer->checked)
+			|-->peer->fails = 0
+
+		|-->ngx_stream_upstream_rr_peer_unlock
+		|-->ngx_stream_upstream_rr_peers_unlock
 
 |-->ngx_stream_proxy_upstream_handler //(ngx_stream_proxy_module.c)
 	|-->ngx_stream_proxy_process_connection //(ngx_stream_proxy_module.c)
@@ -1857,5 +1967,4 @@ failed://上面获取peer失败进入该分支
 |-->ngx_stream_finalize_session //(ngx_stream_handler.c)
 	|-->ngx_stream_log_session //
 	|-->ngx_stream_close_connection //
-
-|-------------------------tcp/udp负载均衡模块主要函数解析 end-------------------------|
+}-------------------------tcp/udp负载均衡模块主要函数解析 end-------------------------|
