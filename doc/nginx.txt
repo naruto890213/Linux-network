@@ -1770,20 +1770,25 @@ failed://上面获取peer失败进入该分支
 	|-->total = 0
 	|-->for (peer = rrp->peers->peer, i = 0; peer;peer = peer->next, i++) //对所有连接进行轮训
 		|-->n = i / (8 * sizeof(uintptr_t))
-		|-->m = (uintptr_t) 1 << i % (8 * sizeof(uintptr_t)) 
+		|-->m = (uintptr_t) 1 << i % (8 * sizeof(uintptr_t)) //按位设置参数
 		|-->if (rrp->tried[n] & m)
+			|-->continue //判断是否为上一次设置的参数,如果上一次取的该值则跳过
+
+		|-->if(peer->down) //如果该节点down,则跳过
 			|-->continue
 
-		|-->if (peer->down)
-			|-->continue
+		|-->if(peer->max_conns && peer->conns >= peer->max_conns)
+			|-->continue //如果存在最大连接且当前连接已经大等于最大连接数则跳过
 
-		|-->if (peer->max_conns && peer->conns >= peer->max_conns)
-			|-->continue
+		|-->if (peer->max_fails
+            && peer->fails >= peer->max_fails
+            && now - peer->checked <= peer->fail_timeout)
+			|-->continue //如果connect失败过且失败次数超过最大失败且未超时则跳过 
 
 		|-->peer->current_weight += peer->effective_weight
 		|-->total += peer->effective_weight
 		|-->if (peer->effective_weight < peer->weight)
-			|-->peer->effective_weight++
+			|-->peer->effective_weight++ //如果有效权重低于权重则增加其权重
 
 		|-->if (best == NULL || peer->current_weight > best->current_weight)
 			|-->best = peer
@@ -1793,10 +1798,10 @@ failed://上面获取peer失败进入该分支
 		|-->return NULL //直接返回空节点
 
 	|-->rrp->current = best //将最佳节点赋值给当前节点
-	|-->n = p / (8 * sizeof(uintptr_t))
-	|-->m = (uintptr_t) 1 << p % (8 * sizeof(uintptr_t))
-	|-->rrp->tried[n] |= m
-	|-->best->current_weight -= total
+	|-->n = p / (8 * sizeof(uintptr_t)) //记录当次选择的节点索引
+	|-->m = (uintptr_t) 1 << p % (8 * sizeof(uintptr_t)) //记录其索引位
+	|-->rrp->tried[n] |= m //设置其值,用于下次选择时避免重复选择该节点
+	|-->best->current_weight -= total //降低当次节点的权重,以下次权重判断时重新进行排序
 	|-->if (now - best->checked > best->fail_timeout) //检查超时时间
 		|-->best->checked = now
 
@@ -1863,6 +1868,10 @@ failed://上面获取peer失败进入该分支
 		|-->return //退出
 
 	|-->if (state & NGX_PEER_FAILED)
+		|-->now = ngx_time()
+		|-->peer->fails++ //设置其fails的数值,后续的get_peer将使用到该值
+		|-->peer->accessed = now
+		|-->peer->checked = now //设置其时间,后续的失败超时时间将使用该值
 		|-->if (peer->max_fails) //默认为1,所以会进入该分支
 			|-->peer->effective_weight-=peer->weight/peer->max_fails //对effective_weight进行处理,该值会在get_peer中使用
 
@@ -1871,7 +1880,7 @@ failed://上面获取peer失败进入该分支
 
 	|-->else //state 不包含NGX_PEER_FAILED
 		|-->if (peer->accessed < peer->checked)
-		|-->peer->fails = 0
+		|-->peer->fails = 0 
 
 |-->ngx_stream_proxy_init_upstream //(ngx_stream_proxy_module.c)
 	|-->ngx_tcp_nodelay //
