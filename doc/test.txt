@@ -30,3 +30,6 @@ free、df、dh等等
 要求写一个函数指针，然后调用该方法
 int *(Add)(int, int)
 Add = add(函数本身就是一个地址，所以不需要再取地址)
+
+|-->ngx_cpuinfo
+	|-->
