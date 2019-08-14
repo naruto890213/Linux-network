@@ -73,4 +73,60 @@ private:
 
 |-->address_book.add_people() //(add_person.cc)
 	|-->people_.Add //(addressbook.pb.h)
+		|-->RepeatedPtrField<Element>::Add() //(repeated_field.h)
+			|-->RepeatedPtrFieldBase::Add<TypeHandler>() //(repeated_field.h)
+				|-->
+
+|-->person->add_phones() //(add_person.cc)
+	|-->phones_.Add() //(addressbook.pb.h)
 		|-->
+
+|-->address_book.ParseFromIstream //(add_person.cc)
+	|-->io::IstreamInputStream zero_copy_input(input)
+	|-->ParseFromZeroCopyStream(&zero_copy_input) //(message.cc)
+		|-->io::CodedInputStream decoder(input)//(message_lite.cc)
+		|-->ParseFromCodedStream(&decoder)//(message_lite.cc)
+			|-->InlineParseFromCodedStream //(message_lite.cc)
+				|-->message->Clear()
+				|-->InlineMergeFromCodedStream //(message_lite.cc)
+					|-->InlineMergePartialFromCodedStream //(message_lite.cc)
+					|-->message->IsInitialized() //
+
+		|-->decoder.ConsumedEntireMessage()//(message_lite.cc)
+
+|-->InlineMergePartialFromCodedStream //(message_lite.cc)
+#if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+	|-->ctx.ParseNoLimit({message->_ParseFunc(), message}, &eps_input)
+	|-->if (res == 1)
+		|-->input->SetConsumed()
+	|-->else if (res == 2)
+		|-->return false
+	|-->else
+		|-->input->SetLastTag(res)
+#else
+	|-->message->MergePartialFromCodedStream //(message_lite.cc)
+#endif
+
+	
+
+|-->address_book.SerializeToOstream //(add_person.cc)
+	|-->SerializeToZeroCopyStream //(message.cc)
+	|-->output->good()//(message.cc)
+
+|-->SerializeToZeroCopyStream //(message.cc)
+	|-->SerializeToCodedStream //(message_lite.cc)
+		|-->IsInitialized()
+		|-->SerializePartialToCodedStream //(message_lite.cc)
+			|-->uint8* buffer = output->GetDirectBufferForNBytesAndAdvance
+			|-->if (buffer != NULL)
+				|-->output->IsSerializationDeterministic()
+				|-->InternalSerializeWithCachedSizesToArray //()
+			|-->else //(buffer == NULL)
+				|-->original_byte_count = output->ByteCount()
+				|-->SerializeWithCachedSizes()
+				|-->output->HadError()
+				|-->final_byte_count = output->ByteCount()
+
+
+|-->InternalSerializeWithCachedSizesToArray //(message_lite.cc)
+	|-->

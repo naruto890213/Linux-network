@@ -1116,7 +1116,7 @@ accept状态:
 	
 |-->ngx_http_update_location_config //(ngx_http_core_module.c)
 	|-->if (clcf->handler)
-		|-->r->content_handler = clcf->handler //函数指针赋值,memcached是ngx_http_memcached_handler
+		|-->r->content_handler = clcf->handler //函数指针赋值,memcached是 ngx_http_memcached_handler
 	
 |-->ngx_http_internal_redirect //(ngx_http_core_module.c)
 	|-->ngx_http_update_location_config //(ngx_http_core_module.c)

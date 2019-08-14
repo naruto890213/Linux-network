@@ -1,0 +1,242 @@
+|-->main //(greeter_server.cc)
+	|-->RunServer //(greeter_server.cc)
+		|-->ServerBuilder builder
+		|-->builder.AddListeningPort(server_address, grpc::InsecureServerCredentials())
+		|-->builder.RegisterService(&service)
+		|-->std::unique_ptr<Server> server(builder.BuildAndStart())
+		|-->server->Wait()
+
+|-->ServerBuilder::AddListeningPort //(server_builder.cc)
+	|-->Port port = {addr, creds, selected_port}
+	|-->ports_.push_back(port) //插入vector容器中
+	|-->return *this //返回结构体
+
+|-->ServerBuilder::RegisterService //(server_builder.cc)
+	|-->services_.emplace_back(new NamedService(service)) //清空并替换vector内容
+	|-->return *this
+
+|-->ServerBuilder::BuildAndStart() //(server_builder.cc)
+	|-->for (auto plugin = plugins_.begin(); plugin != plugins_.end(); plugin++)
+		|-->(*plugin)->UpdateServerBuilder(this)
+
+	|-->for (auto option = options_.begin(); option != options_.end(); ++option)
+		|-->(*option)->UpdateArguments(&args)
+		|-->(*option)->UpdatePlugins(&plugins_)
+
+	|-->for (auto plugin = plugins_.begin(); plugin != plugins_.end(); plugin++)
+		|-->(*plugin)->UpdateChannelArguments(&args)
+
+	|-->if (max_receive_message_size_ >= 0)
+		|-->args.SetInt(GRPC_ARG_MAX_RECEIVE_MESSAGE_LENGTH, max_receive_message_size_)
+
+	|-->if (max_send_message_size_ >= 0)
+		|-->args.SetInt(GRPC_ARG_MAX_SEND_MESSAGE_LENGTH, max_send_message_size_)
+
+	|-->args.SetInt(GRPC_COMPRESSION_CHANNEL_ENABLED_ALGORITHMS_BITSET,
+              enabled_compression_algorithms_bitset_)
+
+	|-->if (maybe_default_compression_level_.is_set)
+		|-->args.SetInt(GRPC_COMPRESSION_CHANNEL_DEFAULT_LEVEL,
+                maybe_default_compression_level_.level)
+
+	|-->if (maybe_default_compression_algorithm_.is_set)
+		|-->args.SetInt(GRPC_COMPRESSION_CHANNEL_DEFAULT_ALGORITHM,
+                maybe_default_compression_algorithm_.algorithm)
+
+	|-->if (resource_quota_ != nullptr)
+		|-->args.SetPointerWithVtable(GRPC_ARG_RESOURCE_QUOTA, resource_quota_,
+                              grpc_resource_quota_arg_vtable())
+
+	|-->bool has_sync_methods = false
+	|-->for (auto it = services_.begin(); it != services_.end(); ++it)
+		|-->if ((*it)->service->has_synchronous_methods())
+			|-->has_sync_methods = true
+			|-->break;
+	
+	|-->if (!has_sync_methods)
+		|-->for (auto plugin = plugins_.begin(); plugin != plugins_.end(); plugin++)
+			|-->if ((*plugin)->has_sync_methods())
+				|-->has_sync_methods = true
+				|-->break
+
+	|-->for (auto it = cqs_.begin(); it != cqs_.end(); ++it)
+		|-->if ((*it)->IsFrequentlyPolled())
+			|-->num_frequently_polled_cqs++
+
+	|-->if (has_sync_methods)
+		|-->grpc_cq_polling_type polling_type =
+        	is_hybrid_server ? GRPC_CQ_NON_POLLING : GRPC_CQ_DEFAULT_POLLING
+		|-->for (int i = 0; i < sync_server_settings_.num_cqs; i++)
+			|-->sync_server_cqs->emplace_back(new ServerCompletionQueue(polling_type))
+
+	|-->std::unique_ptr<Server> server(new Server(
+        max_receive_message_size_, &args, sync_server_cqs,
+        sync_server_settings_.min_pollers, sync_server_settings_.max_pollers,
+        sync_server_settings_.cq_timeout_msec)) //创建server实例,并进行一定的初始化,该操作很重要关系到后面的线程初始化等功能,实际调用的实例化为Server::Server(server_cc.cc)
+
+	|-->ServerInitializer* initializer = server->initializer()
+	|-->for (auto it = sync_server_cqs->begin(); it != sync_server_cqs->end(); ++it)
+		|-->grpc_server_register_completion_queue(server->server_, (*it)->cq(), nullptr)
+		|-->num_frequently_polled_cqs++
+
+	|-->for (auto it = cqs_.begin(); it != cqs_.end(); ++it)
+		|-->grpc_server_register_completion_queue(server->server_, (*it)->cq(), nullptr)
+
+	|-->for (auto service = services_.begin(); service != services_.end(); service++)
+		|-->if (!server->RegisterService((*service)->host.get(), (*service)->service))
+			|-->return nullptr
+
+	|-->for (auto plugin = plugins_.begin(); plugin != plugins_.end(); plugin++)
+		|-->(*plugin)->InitServer(initializer)
+
+	|-->if (generic_service_)
+		|-->server->RegisterAsyncGenericService(generic_service_)
+	|-->else
+		|-->for (auto it = services_.begin(); it != services_.end(); ++it)
+			|-->if ((*it)->service->has_generic_methods())
+				|-->return nullptr
+
+	|-->bool added_port = false
+	|-->for (auto port = ports_.begin(); port != ports_.end(); port++)
+		|-->int r = server->AddListeningPort(port->addr, port->creds.get())
+		|-->if (!r)
+			|-->if (added_port) server->Shutdown()
+			|-->return nullptr
+
+		|-->added_port = true
+		|-->if (port->selected_port != nullptr)
+			|-->*port->selected_port = r
+
+	|-->auto cqs_data = cqs_.empty() ? nullptr : &cqs_[0]
+	|-->server->Start(cqs_data, cqs_.size())
+	|-->for (auto plugin = plugins_.begin(); plugin != plugins_.end(); plugin++)
+		|-->(*plugin)->Finish(initializer)
+
+	|-->return server
+
+|-->ServerBuilder::ServerBuilder() //(server_builder.cc)初始化
+	|-->gpr_once_init(&once_init_plugin_list, do_plugin_list_init)
+	|-->for (auto it = g_plugin_factory_list->begin(); it != g_plugin_factory_list->end(); it++)
+		|-->auto& factory = *it
+		|-->plugins_.emplace_back(factory())
+
+	|-->enabled_compression_algorithms_bitset_ = (1u << GRPC_COMPRESS_ALGORITHMS_COUNT) - 1
+	|-->memset(&maybe_default_compression_level_, 0, sizeof(maybe_default_compression_level_))
+	|-->memset(&maybe_default_compression_algorithm_, 0, sizeof(maybe_default_compression_algorithm_))
+
+|-->gpr_once_init //(sync_posix.cc)
+	|-->GPR_ASSERT(pthread_once(once, init_function) == 0) //判断初始化,使得多线程运行中只能初始化一次
+		|-->init_function //最终运行该函数
+
+|-->do_plugin_list_init //(server_builder.cc)
+	|-->g_plugin_factory_list =
+      new std::vector<std::unique_ptr<ServerBuilderPlugin> (*)()>() //分配内存,在for循环中需要用到
+
+|-->Server::Server //(server_cc.cc) Server带参数的初始化
+	|-->g_gli_initializer.summon()
+	|-->gpr_once_init(&g_once_init_callbacks, InitGlobalCallbacks)
+	|-->global_callbacks_ = g_callbacks
+	|-->global_callbacks_->UpdateArguments(args)
+	|-->if (sync_server_cqs_ != nullptr)
+		|-->for (const auto& it : *sync_server_cqs_)
+			|-->sync_req_mgrs_.emplace_back(new SyncRequestThreadManager(
+          		this, it.get(), global_callbacks_, min_pollers, max_pollers,
+          		sync_cq_timeout_msec)) //	重置容器,开始与线程类关联起来, 在后面的Start函数中调用的为该方法
+
+	|-->args->SetChannelArgs(&channel_args)
+	|-->for (size_t i = 0; i < channel_args.num_args; i++)
+		|-->if (0 == strcmp(channel_args.args[i].key, kHealthCheckServiceInterfaceArg))
+			|-->if (channel_args.args[i].value.pointer.p == nullptr)
+				|-->health_check_service_disabled_ = true
+			|-->else
+				|-->health_check_service_.reset(static_cast<HealthCheckServiceInterface*>(
+            		channel_args.args[i].value.pointer.p))
+
+	|-->server_ = grpc_server_create(&channel_args, nullptr)
+
+|-->Server::Wait() //(server_cc.cc) 
+	|-->while (started_ && !shutdown_notified_)
+		|-->shutdown_cv_.wait(lock)
+
+|-->grpc_chttp2_server_add_port //(chttp2_server.cc)
+	|-->server_start_listener //(chttp2_server.cc)
+		|-->grpc_tcp_server_start //(tcp_server.cc)
+
+|-->Server::Start //(server_cc.cc) 线程启动
+	|-->global_callbacks_->PreServerStar //
+	|-->grpc_server_start //
+	|-->for (auto it = sync_req_mgrs_.begin(); it != sync_req_mgrs_.end(); it++) //轮询容器
+		|-->(*it)->Start() //该容器在初始化时进行容器的插入处理Server::Server中进行赋值处理
+			|-->SyncRequestThreadManager::Start //(server_cc.cc)实际调用的是该函数
+
+|-->SyncRequestThreadManager::Start //(server_cc.cc)
+	|-->if (!sync_requests_.empty())
+		|-->for (auto m = sync_requests_.begin(); m != sync_requests_.end(); m++)
+			|-->(*m)->SetupRequest()
+			|-->(*m)->Request(server_->c_server(), server_cq_->cq())
+
+		|-->Initialize() //初始化
+			|-->ThreadManager::Initialize() //实际调用的是该函数
+
+|-->ThreadManager::Initialize() //(thread_manager.cc) 线程管理初始化
+	|-->for (int i = 0; i < min_pollers_; i++) //根据最小线程数创建线程
+		|-->new WorkerThread(this) //创建新线程
+			|-->ThreadManager::WorkerThread::WorkerThread //实际调用的为该函数
+				|-->ThreadManager::WorkerThread::Run() //在新线程中创建该函数用于处理数据
+
+|-->ThreadManager::WorkerThread::WorkerThread //(thread_manager.cc)
+	|-->thd_ = grpc_core::Thread(
+        "grpcpp_sync_server",
+        [](void* th) { static_cast<ThreadManager::WorkerThread*>(th)->Run(); }, this)//创建线程
+		|-->grpc_core::Thread //thd_是该类型的类
+			|-->Thread(const char* thd_name, void (*thd_body)(void* arg), void* arg,
+         			bool* success = nullptr)//()thd_posix.cc实际调用的是该函数
+
+	|-->thd_.Start()
+		|-->Thread::Start() //(thd.h) 实际调用的是该函数
+
+|-->Thread::Thread(const char* thd_name, void (*thd_body)(void* arg), void* arg,
+               bool* success) //(thd_posix.cc) 创建线程
+	|-->impl_ = grpc_core::New<ThreadInternalsPosix>(thd_name, thd_body, arg, &outcome) //创建类
+	|-->if (outcome)
+		|-->state_ = ALIVE
+	|-->else
+		|-->state_ = FAILED
+		|-->grpc_core::Delete(impl_)
+		|-->impl_ = nullptr
+
+	|-->if (success != nullptr)
+		|-->*success = outcome
+
+|-->ThreadInternalsPosix::ThreadInternalsPosix(const char* thd_name, void (*thd_body)(void* arg),
+            void* arg, bool* success) : started_(false) //(thd_posix.cc)
+	|-->gpr_mu_init(&mu_)
+	|-->gpr_cv_init(&ready_)
+	|-->thd_arg* info = static_cast<thd_arg*>(malloc(sizeof(*info)))
+	|-->info->thread = this
+	|-->info->body = thd_body
+	|-->info->arg = arg
+	|-->info->name = thd_name
+	|-->inc_thd_count()
+	|-->*success = pthread_create //创建线程
+	
+|-->Thread::Start() //(thd.h) 实际调用的是该函数
+	|-->if (impl_ != nullptr)
+		|-->state_ = STARTED
+		|-->impl_->Start() //
+			|-->ThreadInternalsPosix::Start() //(thd_posix.cc)实际调用的是该函数
+				|-->gpr_mu_lock(&mu_)
+				|-->started_ = true
+				|-->gpr_cv_signal(&ready_) //等待信号变量(为了完成初始化)
+				|-->gpr_mu_unlock(&mu_)
+
+|-->ThreadManager::WorkerThread::Run() //(thread_manager.cc) 线程中的工作函数
+	|-->thd_mgr_->MainWorkLoop() //主循环
+	|-->thd_mgr_->MarkAsCompleted(this)
+
+|-->ThreadManager::MainWorkLoop() //(thread_manager.cc) 主循环处理函数
+	|-->
+
+|-->on_read //(tcp_server_posix.cc)
+	|-->grpc_accept4 //(socket_utils_posix.cc)
+		|-->accept
