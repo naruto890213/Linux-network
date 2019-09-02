@@ -33,3 +33,15 @@ Add = add(函数本身就是一个地址，所以不需要再取地址)
 
 |-->ngx_cpuinfo
 	|-->
+
+|-->ngx_http_core_merge_loc_conf
+	|-->ngx_conf_merge_path_value
+		|-->ngx_add_path
+
+|-->ngx_http_block
+	|-->ngx_http_merge_servers
+		|--> ngx_http_core_merge_loc_conf
+
+|-->ngx_http_merge_servers
+	|-->ngx_http_merge_locations
+		|--> ngx_http_core_merge_loc_conf
